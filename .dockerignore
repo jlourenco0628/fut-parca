@@ -1,0 +1,11 @@
+.git
+__pycache__/
+tests/
+*.sqlite
+*.sqlite-*
+*.db
+*.pdf
+*.zip
+README.md
+PUBLICACAO.md
+Iniciar-Fut-Parca.cmd

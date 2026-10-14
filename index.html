@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10241b">
+  <meta name="description" content="Sua turma. Sua pelada. Organize jogos, evolua seu card e dispute a Liga dos Parças.">
+  <title>Fut Parça — Sua turma. Sua pelada.</title>
+  <link rel="icon" href="./app-icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="./app-icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <script src="./theme-init.js"></script>
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./card.css">
+  <link rel="stylesheet" href="./theme.css">
+  <link rel="stylesheet" href="./goal.css">
+</head>
+<body>
+  <svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute"><defs><filter id="fp-logo-palette" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values=".788 0 .212 0 0  0 .949 .051 0 0  .408 0 .592 0 0  0 0 0 1 0"/></filter></defs></svg>
+  <div id="app"><div class="loading">FUT PARÇA <span>Preparando o campo…</span></div></div>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+  <div id="goal-celebration" class="goal-celebration" role="status" aria-live="assertive" hidden></div>
+  <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

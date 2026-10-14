@@ -1,0 +1,84 @@
+[data-theme] {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.brand { display: block; margin: 0 0 26px; }
+.brand-logo { position: relative; width: 180px; height: 101px; overflow: hidden; }
+.brand-logo img { position: absolute; width: 180px; height: 180px; max-width: none; left: 0; top: -38px; filter: contrast(3) url(#fp-logo-palette); mix-blend-mode: screen; }
+.brand small { margin: 5px 0 0 23px; }
+h1, h2, h3 { font-weight: 800; }
+.hero h2 { font-weight: 850; }
+.icon-button { min-width: 42px; min-height: 42px; }
+
+.team-captain-logo { display: block; flex: 0 0 auto; width: 32px; line-height: 0; }
+.team-captain-logo--match { width: 38px; }
+.team-captain-logo--roster { width: 68px; }
+.team-captain-logo .athlete-card { width: 100%; filter: drop-shadow(0 2px 3px rgb(0 0 0 / .18)); }
+.team-name { min-width: 0; }
+.team-name > span:not(.team-dot) { overflow-wrap: anywhere; }
+.roster-head { display: flex; align-items: center; gap: 13px; min-height: 91px; margin-bottom: 8px; }
+.roster-head h3 { margin: 0 0 5px; }
+.roster-head span { font-size: 10px; color: var(--muted); }
+@media (max-width: 650px) {
+  .match-row .team-captain-logo { width: 25px; }
+  .match-box .team-captain-logo { width: 29px; }
+  .team-captain-logo--roster { width: 60px; }
+}
+@media (max-width: 600px) {
+  .athlete-grid { grid-template-columns: 1fr; justify-items: center; }
+  .athlete-tile { width: min(100%, 290px); padding: 16px 14px; }
+  .athlete-tile .card-click { width: min(100%, 240px); }
+  .athlete-tile .athlete-card { width: 100% !important; max-width: none; }
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #ebf3e9;
+  --muted: #a9baad;
+  --dark: #0c1b13;
+  --green: #acd982;
+  --paper: #0d1912;
+  --line: #34483b;
+  --red: #ffaaa1;
+}
+
+[data-theme="dark"] .topbar { background: #15261b; }
+[data-theme="dark"] .stat,
+[data-theme="dark"] .panel,
+[data-theme="dark"] .athlete-tile,
+[data-theme="dark"] .round-chip,
+[data-theme="dark"] .match-box,
+[data-theme="dark"] .roster-team { background: #182b1f; }
+[data-theme="dark"] .match-box.active { background: #203c2b; border-color: #89bb70; }
+[data-theme="dark"] .button.secondary,
+[data-theme="dark"] .icon-button,
+[data-theme="dark"] .tabs button.active,
+[data-theme="dark"] .input { background: #24382a; color: var(--ink); border-color: var(--line); }
+[data-theme="dark"] .button:not(.secondary, .lime, .ghost, .danger) { border: 1px solid #405847; }
+[data-theme="dark"] .button.danger { background: #412725; color: var(--red); }
+[data-theme="dark"] .button.ghost { color: var(--green); }
+[data-theme="dark"] .stat-icon { background: #2c3e2b; color: #c7e496; }
+[data-theme="dark"] .leader-icon { background: #343b2a; color: #e2d184; }
+[data-theme="dark"] .team-dot { background: #367858; }
+[data-theme="dark"] .tabs { background: #1e3225; }
+[data-theme="dark"] .tabs button { color: #b5c6ae; }
+[data-theme="dark"] .panel-header,
+[data-theme="dark"] .match-row,
+[data-theme="dark"] .leader-row,
+[data-theme="dark"] .roster-person,
+[data-theme="dark"] .data-table td { border-color: var(--line); }
+[data-theme="dark"] .data-table th { background: #203326; }
+[data-theme="dark"] .notice { background: #1e3828; border-color: #3c5c3e; color: #d6e9cb; }
+[data-theme="dark"] .notice.error,
+[data-theme="dark"] .dialog-error { background: #412a26; border-color: #6a4038; color: #ffb0a2; }
+[data-theme="dark"] .badge { background: #2b402c; color: #c9e6b4; }
+[data-theme="dark"] .badge.live { background: #29442b; color: #d0eeb3; }
+[data-theme="dark"] .badge.closed { background: #28384b; color: #bed6f7; }
+[data-theme="dark"] .badge.neutral { background: #303b32; color: #becdbb; }
+[data-theme="dark"] .skill-track { background: #344839; }
+[data-theme="dark"] .user-avatar { background: #2b4931; border-color: #47654c; color: #dbf0d0; }
+[data-theme="dark"] .photo-preview { background: #2a422e; border-color: #516552; }
+[data-theme="dark"] dialog { background: #17291e; color: var(--ink); }
+[data-theme="dark"] .check-person { border-color: var(--line); }
+[data-theme="dark"] .round-chip.active { border-color: var(--green); }
+[data-theme="dark"] .athlete-tile:hover { border-color: #83ad70; }

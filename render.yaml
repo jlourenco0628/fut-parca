@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: fut-parca
+    runtime: docker
+    plan: 0.5c-512mb
+    healthCheckPath: /api/health
+    disk:
+      name: fut-parca-data
+      mountPath: /var/data
+      sizeGB: 1

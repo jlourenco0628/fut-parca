@@ -1,0 +1,29 @@
+.draw-options { display: grid; gap: 12px; margin: 22px 0 8px; }
+.draw-option { display: flex; align-items: flex-start; gap: 13px; padding: 17px; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; background: color-mix(in srgb, var(--white) 96%, var(--lime)); }
+.draw-option:has(input:checked) { border-color: var(--green); box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 20%, transparent); }
+.draw-option input { accent-color: var(--green); margin-top: 3px; }
+.draw-option strong, .draw-option small { display: block; }
+.draw-option strong { font-size: 13px; margin-bottom: 5px; }
+.draw-option small { color: var(--muted); font-size: 11px; line-height: 1.45; }
+[data-theme="dark"] .draw-option { background: #203427; }
+
+.goal-celebration { position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center; pointer-events: none; background: radial-gradient(circle at center, rgb(31 85 51 / .9), rgb(5 22 12 / .9) 67%); color: #fff; text-align: center; overflow: hidden; }
+.goal-celebration[hidden] { display: none; }
+.goal-celebration__body { position: relative; z-index: 1; padding: 26px; max-width: min(90vw, 550px); }
+.goal-celebration__ball { font-size: clamp(52px, 12vw, 86px); filter: drop-shadow(0 8px 14px rgb(0 0 0 / .35)); }
+.goal-celebration__label { color: #d7ff53; font-size: 12px; font-weight: 800; letter-spacing: .25em; margin: 18px 0 2px; }
+.goal-celebration__body > strong { display: block; font-size: clamp(68px, 17vw, 142px); font-style: italic; font-weight: 950; letter-spacing: -.08em; line-height: .95; text-shadow: 0 10px 0 rgb(0 0 0 / .2); }
+.goal-celebration__body p { margin: 15px 0; font-size: clamp(16px, 4vw, 25px); font-weight: 750; }
+.goal-celebration__score { display: inline-flex; align-items: center; gap: 14px; font-size: 13px; font-weight: 650; background: rgb(0 0 0 / .28); border: 1px solid rgb(255 255 255 / .25); border-radius: 14px; padding: 10px 16px; }
+.goal-celebration__score b { color: #d7ff53; font-size: 24px; white-space: nowrap; }
+.goal-celebration__lights { position: absolute; inset: -35%; background: repeating-conic-gradient(from 0deg, transparent 0deg 12deg, rgb(210 255 90 / .1) 13deg 16deg, transparent 17deg 30deg); }
+.goal-celebration.is-playing .goal-celebration__lights { animation: goal-spin 2.8s linear both; }
+.goal-celebration.is-playing .goal-celebration__body { animation: goal-enter .65s cubic-bezier(.2,1.35,.3,1) both; }
+.goal-celebration.is-playing .goal-celebration__ball { animation: goal-ball 1.8s ease-in-out .15s both; }
+.goal-scored { animation: goal-pulse 1.2s ease-out 2; }
+@keyframes goal-enter { from { opacity: 0; transform: scale(.55) translateY(70px) rotate(-7deg); } to { opacity: 1; transform: scale(1) translateY(0) rotate(0); } }
+@keyframes goal-ball { 0% { transform: translateY(-90px) rotate(-70deg) scale(.4); } 50% { transform: translateY(8px) rotate(12deg) scale(1.13); } 100% { transform: translateY(0) rotate(0) scale(1); } }
+@keyframes goal-spin { from { transform: rotate(-28deg) scale(.7); opacity: 0; } 20% { opacity: 1; } to { transform: rotate(40deg) scale(1.1); } }
+@keyframes goal-pulse { 50% { box-shadow: 0 0 0 7px rgb(202 242 104 / .35); border-color: #bfe95e; } }
+@media (max-width: 480px) { .goal-celebration__score { font-size: 11px; gap: 8px; } .goal-celebration__score b { font-size: 19px; } }
+@media (prefers-reduced-motion: reduce) { .goal-celebration *, .goal-scored { animation: none !important; } }

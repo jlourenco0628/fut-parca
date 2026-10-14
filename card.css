@@ -1,0 +1,104 @@
+.athlete-card {
+  --fp-card-ink: #443315;
+  --fp-card-1: #dcc076;
+  --fp-card-2: #f3e1a6;
+  --fp-card-3: #d9bb70;
+  --fp-card-4: #b89142;
+  position: relative;
+  width: 16.25rem;
+  aspect-ratio: 260 / 360;
+  flex: 0 0 auto;
+  color: var(--fp-card-ink);
+  font-family: Impact, "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  font-stretch: condensed;
+  isolation: isolate;
+  filter: drop-shadow(0 10px 14px rgb(0 0 0 / .22));
+  user-select: none;
+  container-type: inline-size;
+}
+.athlete-card, .athlete-card * { box-sizing: border-box; }
+.athlete-card--compact { width: 12.5rem; }
+.athlete-card--silver { --fp-card-ink: #3c4142; --fp-card-1: #9fa9ae; --fp-card-2: #e2e7e8; --fp-card-3: #bec8cd; --fp-card-4: #828e92; }
+.athlete-card--blue { --fp-card-ink: #f4e0ad; --fp-card-1: #152e5c; --fp-card-2: #34508c; --fp-card-3: #102952; --fp-card-4: #0c1532; }
+.athlete-card .athlete-card__background { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.athlete-card .athlete-card__stop-1 { stop-color: var(--fp-card-1); }
+.athlete-card .athlete-card__stop-2 { stop-color: var(--fp-card-2); }
+.athlete-card .athlete-card__stop-3 { stop-color: var(--fp-card-3); }
+.athlete-card .athlete-card__stop-4 { stop-color: var(--fp-card-4); }
+.athlete-card .athlete-card__outer { stroke: #aa8641; stroke-width: 1.2; }
+.athlete-card--silver .athlete-card__outer { stroke: #919b9f; }
+.athlete-card--blue .athlete-card__outer { stroke: #c6a25a; }
+.athlete-card .athlete-card__upper { position: absolute; top: 13.2%; left: 11.6%; width: 23%; z-index: 3; display: flex; align-items: center; flex-direction: column; }
+.athlete-card .athlete-card__overall { font-size: 19.3cqw; font-weight: 400; line-height: .94; letter-spacing: -.04em; }
+.athlete-card .athlete-card__position { margin-top: 1.8cqw; font-size: 8.2cqw; font-weight: 400; line-height: 1; }
+.athlete-card .athlete-card__identity-line { width: 68%; height: 1px; margin-top: 3cqw; margin-bottom: 3cqw; background: currentColor; opacity: .4; }
+.athlete-card .athlete-card__flag { display: block; width: 12.3cqw; height: auto; box-shadow: 0 1px 2px rgb(0 0 0 / .07); }
+.athlete-card .athlete-card__badge { display: block; position: absolute; top: 46%; left: 16.6%; width: 13cqw; height: 11.5cqw; z-index: 4; background: url('./logo-fut-parca.jpeg') -8.5cqw -6.5cqw / 30cqw 30cqw no-repeat; filter: contrast(3) grayscale(1) invert(1); mix-blend-mode: multiply; }
+.athlete-card .athlete-card__photo { position: absolute; left: 31%; top: 10.8%; width: 64.5%; height: 45%; z-index: 2; overflow: hidden; -webkit-mask-image: linear-gradient(#000 80%, transparent); mask-image: linear-gradient(#000 80%, transparent); }
+.athlete-card .athlete-card__portrait { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center bottom; }
+.athlete-card .athlete-card__portrait--photo { object-fit: cover; object-position: center 20%; border-radius: 2px; }
+.athlete-card .athlete-card__name { position: absolute; top: 59.5%; left: 13%; right: 13%; height: 7.8%; display: flex; align-items: center; justify-content: center; white-space: nowrap; font-size: 9.5cqw; line-height: 1; font-weight: 400; letter-spacing: .01em; text-align: center; border-top: 1px solid rgb(88 63 22 / .16); border-bottom: 1px solid rgb(88 63 22 / .28); overflow: hidden; z-index: 3; background: linear-gradient(90deg, transparent, rgb(247 230 177 / .54) 22%, rgb(247 230 177 / .54) 78%, transparent); }
+.athlete-card .athlete-card__name--long { font-size: 7.2cqw; }
+.athlete-card--blue .athlete-card__name { border-bottom-color: rgb(244 224 173 / .35); }
+.athlete-card .athlete-card__stats { position: absolute; top: 68.1%; left: 20%; right: 20%; display: grid; grid-template-columns: 1fr 1fr; z-index: 3; }
+.athlete-card .athlete-card__stat-column { display: flex; flex-direction: column; gap: 1.1cqw; }
+.athlete-card .athlete-card__stat-column + .athlete-card__stat-column { padding-left: 4cqw; border-left: 1px solid rgb(88 63 22 / .25); }
+.athlete-card--blue .athlete-card__stat-column + .athlete-card__stat-column { border-left-color: rgb(244 224 173 / .3); }
+.athlete-card .athlete-card__stat { display: flex; align-items: baseline; gap: .8cqw; font-size: 7.5cqw; line-height: 1; letter-spacing: .01em; white-space: nowrap; }
+.athlete-card .athlete-card__stat strong { font-weight: 400; font-size: 8.7cqw; min-width: 8.4cqw; }
+.athlete-card .athlete-card__stat span { font-size: 6.5cqw; }
+.athlete-card .athlete-card__footer { position: absolute; top: 90.5%; left: 29%; right: 29%; display: flex; align-items: center; gap: 3cqw; opacity: .62; }
+.athlete-card .athlete-card__footer span { height: 1px; background: currentColor; flex: 1; }
+.athlete-card .athlete-card__footer svg { width: 5cqw; height: 5cqw; flex: 0 0 auto; }
+.athlete-card .athlete-card__sheen {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  clip-path: polygon(50% 2%, 59% 5%, 84% 8%, 95% 14%, 91% 71%, 87% 78%, 69% 91%, 50% 98%, 31% 91%, 13% 78%, 9% 71%, 5% 14%, 16% 8%, 41% 5%);
+  background: radial-gradient(circle at var(--fp-shine-x, 50%) var(--fp-shine-y, 35%), rgb(255 255 255 / .55), rgb(255 255 255 / .14) 23%, transparent 51%), linear-gradient(115deg, transparent 32%, rgb(255 255 255 / .28) 49%, transparent 67%);
+  mix-blend-mode: screen;
+  transition: opacity 240ms ease;
+}
+.athlete-card {
+  --fp-tilt-x: 0deg;
+  --fp-tilt-y: 0deg;
+  --fp-lift: 0px;
+  --fp-scale: 1;
+  transform: perspective(850px) rotateX(var(--fp-tilt-x)) rotateY(var(--fp-tilt-y)) translateY(var(--fp-lift)) scale(var(--fp-scale));
+  transition: transform 420ms cubic-bezier(.2, .75, .2, 1), filter 220ms ease;
+  backface-visibility: hidden;
+}
+.athlete-card--moving { transition-duration: 80ms, 220ms; will-change: transform; }
+.athlete-card--moving .athlete-card__sheen,
+.card-click:focus-visible .athlete-card__sheen { opacity: .75; }
+.card-click:focus-visible .athlete-card { filter: drop-shadow(0 0 12px rgb(201 242 104 / .5)); }
+@media (hover: hover) {
+  .athlete-card:hover { --fp-lift: -4px; --fp-scale: 1.025; filter: drop-shadow(0 18px 19px rgb(0 0 0 / .3)); }
+  .athlete-card:hover .athlete-card__sheen { opacity: .7; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hero-card .athlete-card { animation: fp-card-reveal 850ms cubic-bezier(.2, .7, .2, 1); }
+  .athlete-card.athlete-card--tap,
+  .hero-card .athlete-card.athlete-card--tap { animation: fp-card-tap 780ms cubic-bezier(.2, .7, .2, 1); }
+  .athlete-card--tap .athlete-card__sheen { animation: fp-card-flash 780ms ease-out; }
+}
+@keyframes fp-card-reveal {
+  0% { opacity: 0; transform: perspective(850px) rotateY(-42deg) rotateX(8deg) translateY(15px) scale(.88); filter: brightness(1.45); }
+  65% { opacity: 1; transform: perspective(850px) rotateY(8deg) rotateX(-2deg) translateY(-3px) scale(1.025); }
+  100% { opacity: 1; transform: perspective(850px) rotateY(0deg) rotateX(0deg) translateY(0) scale(1); }
+}
+@keyframes fp-card-tap {
+  0%, 100% { transform: perspective(850px) rotateY(0deg) rotateX(0deg) scale(1); }
+  38% { transform: perspective(850px) rotateY(-14deg) rotateX(5deg) scale(1.04); }
+  72% { transform: perspective(850px) rotateY(7deg) rotateX(-2deg) scale(1.02); }
+}
+@keyframes fp-card-flash {
+  0%, 100% { opacity: 0; }
+  42% { opacity: .9; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .athlete-card, .hero-card .athlete-card, .athlete-card.athlete-card--tap { animation: none; transition: none; transform: none; }
+  .athlete-card .athlete-card__sheen { display: none; }
+}
