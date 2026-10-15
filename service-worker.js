@@ -1,9 +1,9 @@
-const CACHE = 'fut-parca-shell-v5';
+const CACHE = 'fut-parca-shell-v7';
 const SHELL = [
   './', './index.html', './styles.css', './theme.css', './card.css', './goal.css',
   './theme-init.js', './app.js', './account_client.mjs', './card.mjs', './domain.mjs', './seed.mjs',
   './manifest.webmanifest', './logo-fut-parca.jpeg', './app-icon-192.png', './app-icon-512.png',
-  './app-icon-maskable-512.png', './excluir-conta.html',
+  './app-icon-maskable-512.png', './avatar-1.png', './avatar-2.png', './avatar-3.png', './avatar-4.png', './excluir-conta.html',
 ];
 
 self.addEventListener('install', event => {
