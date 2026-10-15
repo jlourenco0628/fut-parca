@@ -109,7 +109,7 @@ async function report(req, res) {
   } finally { await Promise.allSettled([unlink(input), unlink(output)]); }
 }
 
-async function api(req, res, pathname) {
+async function api(req, res, pathname, url) {
   if (!['GET', 'HEAD'].includes(req.method)) mutationOrigin(req);
   if (pathname === '/api/health' && req.method === 'GET') return json(res, 200, { ok:true });
   if (pathname === '/api/config' && req.method === 'GET') return json(res, 200, { public:Boolean(config.publicOrigin) });
@@ -141,6 +141,11 @@ async function api(req, res, pathname) {
     const payload = await bodyJSON(req, 10 * 1024 * 1024);
     return json(res, 200, await store.saveState(sessionToken(req), payload));
   }
+  if (pathname === '/api/peladas' && req.method === 'GET') return json(res, 200, await store.searchGroups(url.searchParams.get('q') || ''));
+  if (pathname === '/api/peladas' && req.method === 'POST') return json(res, 201, await store.createGroup(sessionToken(req), await bodyJSON(req, 2500000)));
+  if (pathname === '/api/pelada-request' && req.method === 'POST') { const body = await bodyJSON(req); return json(res, 201, await store.requestJoin(sessionToken(req), body.groupId)); }
+  if (pathname === '/api/pelada-requests' && req.method === 'GET') return json(res, 200, await store.joinRequests(sessionToken(req)));
+  if (pathname === '/api/pelada-request-action' && req.method === 'POST') { const body = await bodyJSON(req); return json(res, 200, await store.decideJoin(sessionToken(req), body.requestId, body.decision)); }
   if (pathname === '/api/report' && req.method === 'POST') return report(req, res);
   return error(res, 404, 'Recurso não encontrado.');
 }
@@ -151,7 +156,7 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'");
   try {
     const url = new URL(req.url, `http://127.0.0.1:${port}`);
-    if (url.pathname.startsWith('/api/')) return await api(req, res, url.pathname);
+    if (url.pathname.startsWith('/api/')) return await api(req, res, url.pathname, url);
     if (req.method !== 'GET' && req.method !== 'HEAD') return error(res, 405, 'Método não permitido.');
     const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'index.html';
     const path = resolve(root, rel);

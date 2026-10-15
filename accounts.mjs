@@ -8,7 +8,7 @@ import { MODALITIES, EVENT_RULES, beginRound, closeRound, saveFantasy } from './
 const scrypt = promisify(scryptCallback);
 const SESSION_LIFETIME = 7 * 24 * 60 * 60 * 1000;
 const ATTRIBUTE_KEYS = ['rit', 'fin', 'pas', 'con', 'def', 'fis', 'div', 'han', 'kic', 'ref', 'spd', 'pos'];
-const PERSONAL_FIELDS = new Set(['name', 'nickname', 'contact', 'photo', 'preferences']);
+const PERSONAL_FIELDS = new Set(['name', 'nickname', 'contact', 'photo', 'avatar', 'sex', 'birthDate', 'preferences']);
 const EVENT_TYPES = new Map(EVENT_RULES.map(rule => [rule.type, rule]));
 const copy = value => structuredClone(value);
 const hashToken = token => createHash('sha256').update(token).digest('hex');
@@ -55,10 +55,13 @@ function uniqueId(seen, value, label) {
   seen.add(value);
 }
 
-function newAthlete(name, email) {
+function newAthlete(name, email, profile = {}) {
   return {
-    id: `athlete-${randomUUID()}`, name, nickname: name.split(/\s+/u)[0].slice(0, 18), contact: email, photo: '',
-    preferences: { futebol: { primary: 'Meia', secondary: '' }, futsal: { primary: 'Ala', secondary: '' }, society: { primary: 'Meio-campista', secondary: '' } },
+    id: `athlete-${randomUUID()}`, name, nickname: String(profile.nickname || name.split(/\s+/u)[0]).slice(0, 18), contact: String(profile.contact || email), photo: String(profile.photo || ''),
+    avatar: ['avatar-1','avatar-2','avatar-3','avatar-4'].includes(profile.avatar) ? profile.avatar : 'avatar-1',
+    sex: ['masculino','feminino','nao-binario','prefiro-nao-informar'].includes(profile.sex) ? profile.sex : 'prefiro-nao-informar',
+    birthDate: typeof profile.birthDate === 'string' ? profile.birthDate : '',
+    preferences: profile.preferences || { futebol: { primary: 'Meia', secondary: '' }, futsal: { primary: 'Ala', secondary: '' }, society: { primary: 'Meio-campista', secondary: '' } },
     baseSkills: Object.fromEntries(Object.keys(MODALITIES).map(modality => [modality, Object.fromEntries(ATTRIBUTE_KEYS.map(key => [key, 60]))])),
   };
 }
@@ -79,7 +82,7 @@ function validatePhoto(photo) {
 function publicSession(user, group) {
   return {
     user: { id: user.id, name: user.name, email: user.email },
-    group: { id: group.id, name: group.name, role: user.role, ...(user.role === 'organizer' ? { inviteCode: group.inviteCode } : {}) },
+    group: { id: group.id, name: group.name, role: user.role, profileOnly: Boolean(group.state.profileOnly), logo: group.state.logo || '', weeklyDay: group.state.weeklyDay || '', weeklyTime: group.state.weeklyTime || '', ...(user.role === 'organizer' ? { inviteCode: group.inviteCode } : {}) },
     athleteId: user.athleteId, revision: group.revision, state: copy(group.state),
   };
 }
@@ -96,6 +99,7 @@ async function openRepository(path) {
       CREATE TABLE IF NOT EXISTS groups (id TEXT PRIMARY KEY, name TEXT NOT NULL, invite_code TEXT NOT NULL UNIQUE, revision INTEGER NOT NULL, state_json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, group_id TEXT NOT NULL REFERENCES groups(id), role TEXT NOT NULL, athlete_id TEXT NOT NULL, password_salt TEXT NOT NULL, password_hash TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS join_requests (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), group_id TEXT NOT NULL REFERENCES groups(id), status TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(user_id, group_id));
       CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);`);
     const groupRow = row => row ? { id: row.id, name: row.name, inviteCode: row.invite_code, revision: row.revision, state: JSON.parse(row.state_json) } : undefined;
     const userRow = row => row ? { id: row.id, name: row.name, email: row.email, groupId: row.group_id, role: row.role, athleteId: row.athlete_id, salt: row.password_salt, hash: row.password_hash } : undefined;
@@ -107,11 +111,18 @@ async function openRepository(path) {
       usersForGroup: id => db.prepare('SELECT * FROM users WHERE group_id=?').all(id).map(userRow),
       groupById: id => groupRow(db.prepare('SELECT * FROM groups WHERE id=?').get(id)),
       groupByInvite: code => groupRow(db.prepare('SELECT * FROM groups WHERE invite_code=?').get(code)),
+      allGroups: () => db.prepare('SELECT * FROM groups').all().map(groupRow),
       insertGroup(group) { db.prepare('INSERT INTO groups VALUES (?,?,?,?,?)').run(group.id, group.name, group.inviteCode, group.revision, JSON.stringify(group.state)); },
-      updateGroup(group) { db.prepare('UPDATE groups SET revision=?,state_json=? WHERE id=?').run(group.revision, JSON.stringify(group.state), group.id); },
+      updateGroup(group) { db.prepare('UPDATE groups SET name=?,revision=?,state_json=? WHERE id=?').run(group.name, group.revision, JSON.stringify(group.state), group.id); },
       deleteGroup(id) { db.prepare('DELETE FROM groups WHERE id=?').run(id); },
       insertUser(user) { db.prepare('INSERT INTO users VALUES (?,?,?,?,?,?,?,?)').run(user.id, user.name, user.email, user.groupId, user.role, user.athleteId, user.salt, user.hash); },
       updateUserRole(id, role) { db.prepare('UPDATE users SET role=? WHERE id=?').run(role, id); },
+      updateUserMembership(id, groupId, role) { db.prepare('UPDATE users SET group_id=?,role=? WHERE id=?').run(groupId, role, id); },
+      requestByUserGroup(userId, groupId) { return db.prepare('SELECT * FROM join_requests WHERE user_id=? AND group_id=?').get(userId, groupId); },
+      requestsForGroup(groupId) { return db.prepare('SELECT * FROM join_requests WHERE group_id=? ORDER BY created_at').all(groupId); },
+      requestById(id) { return db.prepare('SELECT * FROM join_requests WHERE id=?').get(id); },
+      insertRequest(request) { db.prepare('INSERT INTO join_requests VALUES (?,?,?,?,?)').run(request.id, request.userId, request.groupId, request.status, request.createdAt); },
+      updateRequest(id, status) { db.prepare('UPDATE join_requests SET status=? WHERE id=?').run(status, id); },
       deleteUser(id) { db.prepare('DELETE FROM users WHERE id=?').run(id); },
       sessionByHash: hash => { const row = db.prepare('SELECT * FROM sessions WHERE token_hash=?').get(hash); return row ? { userId: row.user_id, expiresAt: row.expires_at } : undefined; },
       insertSession(hash, userId, expiresAt) { db.prepare('DELETE FROM sessions WHERE expires_at<=?').run(Date.now()); db.prepare('INSERT INTO sessions VALUES (?,?,?)').run(hash, userId, expiresAt); },
@@ -121,7 +132,8 @@ async function openRepository(path) {
     };
   }
   const jsonPath = `${path}.json`;
-  let data = existsSync(jsonPath) ? JSON.parse(readFileSync(jsonPath, 'utf8')) : { version: 1, users: [], groups: [], sessions: [] };
+  let data = existsSync(jsonPath) ? JSON.parse(readFileSync(jsonPath, 'utf8')) : { version: 2, users: [], groups: [], sessions: [], joinRequests: [] };
+  data.joinRequests ||= [];
   let inTransaction = false;
   const persist = () => { const temporary = `${jsonPath}.${randomUUID()}.tmp`; writeFileSync(temporary, JSON.stringify(data), { encoding: 'utf8', mode: 0o600 }); renameSync(temporary, jsonPath); };
   const read = fn => { if (!inTransaction) data = JSON.parse(readFileSync(jsonPath, 'utf8')); return fn(); };
@@ -138,10 +150,17 @@ async function openRepository(path) {
     userByEmail: email => read(() => data.users.find(user => user.email === email)), userById: id => read(() => data.users.find(user => user.id === id)),
     usersForGroup: id => read(() => data.users.filter(user => user.groupId === id)), groupById: id => read(() => data.groups.find(group => group.id === id)),
     groupByInvite: code => read(() => data.groups.find(group => group.inviteCode === code)), insertGroup: group => data.groups.push(copy(group)),
+    allGroups: () => read(() => data.groups.map(copy)),
     updateGroup(group) { data.groups[data.groups.findIndex(item => item.id === group.id)] = copy(group); },
     deleteGroup(id) { data.groups = data.groups.filter(group => group.id !== id); },
     insertUser: user => data.users.push(copy(user)),
     updateUserRole(id, role) { const user = data.users.find(item => item.id === id); if (user) user.role = role; },
+    updateUserMembership(id, groupId, role) { const user = data.users.find(item => item.id === id); if (user) { user.groupId = groupId; user.role = role; } },
+    requestByUserGroup: (userId, groupId) => read(() => data.joinRequests.find(item => item.userId === userId && item.groupId === groupId)),
+    requestsForGroup: groupId => read(() => data.joinRequests.filter(item => item.groupId === groupId)),
+    requestById: id => read(() => data.joinRequests.find(item => item.id === id)),
+    insertRequest: request => data.joinRequests.push(copy(request)),
+    updateRequest(id, status) { const item = data.joinRequests.find(request => request.id === id); if (item) item.status = status; },
     deleteUser(id) { data.users = data.users.filter(user => user.id !== id); },
     sessionByHash: hash => read(() => data.sessions.find(session => session.hash === hash)),
     insertSession(hash, userId, expiresAt) { data.sessions = data.sessions.filter(session => session.expiresAt > Date.now()); data.sessions.push({ hash, userId, expiresAt }); },
@@ -161,6 +180,8 @@ function validateState(input, previous, users) {
     object(athlete, 'Atleta'); uniqueId(athleteIds, athlete.id, 'Identificador de atleta');
     text(athlete.name, 'Nome do atleta', 80); text(athlete.nickname, 'Apelido', 18); text(athlete.contact, 'Contato', 254);
     validatePhoto(athlete.photo);
+    if (athlete.sex != null && !['masculino','feminino','nao-binario','prefiro-nao-informar'].includes(athlete.sex)) error('Sexo do atleta inválido.');
+    if (athlete.avatar != null && !['avatar-1','avatar-2','avatar-3','avatar-4'].includes(athlete.avatar)) error('Avatar inválido.');
     object(athlete.preferences, 'Preferências'); object(athlete.baseSkills, 'Skills');
     for (const [modality, settings] of Object.entries(MODALITIES)) {
       const preferences = athlete.preferences[modality]; object(preferences, 'Posições');
@@ -178,6 +199,11 @@ function validateState(input, previous, users) {
   for (const round of state.rounds) {
     object(round, 'Pelada'); uniqueId(roundIds, round.id, 'Identificador de pelada');
     text(round.title, 'Nome da pelada', 80);
+    if (round.time != null && (typeof round.time !== 'string' || !/^\d{2}:\d{2}$/.test(round.time))) error('Horário da pelada inválido.');
+    if (round.confirmedAthleteIds != null) {
+      list(round.confirmedAthleteIds, 'Presenças', 300);
+      if (new Set(round.confirmedAthleteIds).size !== round.confirmedAthleteIds.length || round.confirmedAthleteIds.some(id => !athleteIds.has(id))) error('Lista de presença inválida.');
+    }
     if (typeof round.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(round.date) || !Number.isFinite(Date.parse(round.date)) || new Date(round.date).toISOString().slice(0, 10) !== round.date) error('Data da pelada inválida.');
     if (!MODALITIES[round.modality] || !['draft', 'live', 'closed'].includes(round.status)) error('Modalidade ou situação da pelada inválida.');
     if (round.drawMode != null && !['random', 'balanced'].includes(round.drawMode)) error('Modo de sorteio inválido.');
@@ -271,7 +297,10 @@ function validateMemberChanges(previous, next, user) {
   for (let index = 0; index < previous.rounds.length; index++) {
     const before = previous.rounds[index], after = next.rounds[index];
     if (before.id !== after.id) fail();
-    if (!isDeepStrictEqual({ ...before, fantasy: [] }, { ...after, fantasy: [] })) fail();
+    if (!isDeepStrictEqual({ ...before, fantasy: [], confirmedAthleteIds: [] }, { ...after, fantasy: [], confirmedAthleteIds: [] })) fail();
+    const beforePresence = new Set(before.confirmedAthleteIds || []), afterPresence = new Set(after.confirmedAthleteIds || []);
+    for (const id of new Set([...beforePresence, ...afterPresence])) if (id !== user.athleteId && beforePresence.has(id) !== afterPresence.has(id)) fail();
+    if (before.status !== 'draft' && beforePresence.has(user.athleteId) !== afterPresence.has(user.athleteId)) fail();
     if (before.status !== 'draft') { if (!isDeepStrictEqual(before.fantasy, after.fantasy)) fail(); continue; }
     const existing = new Map(before.fantasy.map(lineup => [lineup.id, lineup]));
     const supplied = new Map(after.fantasy.map(lineup => [lineup.id, lineup]));
@@ -341,11 +370,11 @@ export async function createAccountStore({ path } = {}) {
     async register(input = {}) {
       const name = text(input.name, 'Nome', 80, 2), email = emailOf(input.email), password = passwordOf(input.password);
       const inviteCode = input.inviteCode ? text(input.inviteCode, 'Convite', 24).toUpperCase() : '';
-      const groupName = !inviteCode ? text(input.groupName, 'Nome da turma', 80, 2) : '';
+      const groupName = !inviteCode && input.groupName ? text(input.groupName, 'Nome da turma', 80, 2) : '';
       const salt = randomBytes(16).toString('hex'), hash = (await scrypt(password, salt, 64)).toString('hex');
       return repository.transaction(() => {
         if (repository.userByEmail(email)) error('Já existe uma conta com este e-mail.', 409);
-        const athlete = newAthlete(name, email);
+        const athlete = newAthlete(name, email, input.profile || input);
         let group;
         if (inviteCode) {
           group = repository.groupByInvite(inviteCode);
@@ -354,10 +383,10 @@ export async function createAccountStore({ path } = {}) {
           group.state.athletes.push(athlete); group.revision++; repository.updateGroup(group);
         } else {
           let code; do { code = randomBytes(6).toString('hex').toUpperCase(); } while (repository.groupByInvite(code));
-          group = { id: `group-${randomUUID()}`, name: groupName, inviteCode: code, revision: 1, state: { version: 1, athletes: [athlete], rounds: [] } };
+          group = { id: `group-${randomUUID()}`, name: groupName || 'Meu perfil', inviteCode: code, revision: 1, state: { version: 1, athletes: [athlete], rounds: [], ...(!groupName ? { profileOnly: true } : {}) } };
           repository.insertGroup(group);
         }
-        const user = { id: `user-${randomUUID()}`, name, email, groupId: group.id, role: inviteCode ? 'member' : 'organizer', athleteId: athlete.id, salt, hash };
+        const user = { id: `user-${randomUUID()}`, name, email, groupId: group.id, role: inviteCode || !groupName ? 'member' : 'organizer', athleteId: athlete.id, salt, hash };
         repository.insertUser(user);
         const token = issueSession(user);
         return { token, session: publicSession(user, group) };
@@ -398,6 +427,58 @@ export async function createAccountStore({ path } = {}) {
       });
     },
     async getState(token) { const { user, group } = requireSession(token); return publicSession(user, group); },
+    async searchGroups(query = '') {
+      const term = String(query || '').trim().toLocaleLowerCase('pt-BR').slice(0, 80);
+      return repository.allGroups().filter(group => !group.state.profileOnly && (!term || group.name.toLocaleLowerCase('pt-BR').includes(term))).slice(0, 40).map(group => ({ id: group.id, name: group.name, logo: group.state.logo || '', weeklyDay: group.state.weeklyDay || '', weeklyTime: group.state.weeklyTime || '', members: group.state.athletes.length }));
+    },
+    async createGroup(token, input = {}) {
+      return repository.transaction(() => {
+        const { user, group } = requireSession(token);
+        if (!group.state.profileOnly) error('Você já faz parte de uma pelada.', 409);
+        group.name = text(input.name, 'Nome da pelada', 80, 2);
+        validatePhoto(String(input.logo || ''));
+        group.state = { ...group.state, profileOnly: false, logo: String(input.logo || ''), weeklyDay: text(input.weeklyDay, 'Dia da semana', 12), weeklyTime: text(input.weeklyTime, 'Horário', 5) };
+        if (!/^\d{2}:\d{2}$/.test(group.state.weeklyTime)) error('Horário inválido.');
+        group.revision++; repository.updateGroup(group); repository.updateUserRole(user.id, 'organizer'); user.role = 'organizer';
+        return publicSession(user, group);
+      });
+    },
+    async requestJoin(token, groupId) {
+      return repository.transaction(() => {
+        const { user, group } = requireSession(token);
+        if (!group.state.profileOnly) error('Você já faz parte de uma pelada.', 409);
+        const target = repository.groupById(identifier(groupId, 'Pelada'));
+        if (!target || target.state.profileOnly) error('Pelada não encontrada.', 404);
+        const previous = repository.requestByUserGroup(user.id, target.id);
+        if (previous?.status === 'pending') error('Seu pedido já está aguardando aprovação.', 409);
+        const request = { id: `request-${randomUUID()}`, userId: user.id, groupId: target.id, status: 'pending', createdAt: new Date().toISOString() };
+        if (previous) repository.updateRequest(previous.id, 'pending'); else repository.insertRequest(request);
+        return { ok: true };
+      });
+    },
+    async joinRequests(token) {
+      const { user, group } = requireSession(token);
+      if (user.role !== 'organizer') error('Só o organizador pode ver os pedidos.', 403);
+      return repository.requestsForGroup(group.id).filter(item => item.status === 'pending').map(item => { const applicant = repository.userById(item.user_id || item.userId); const source = applicant && repository.groupById(applicant.groupId); const profile = source?.state.athletes.find(a => a.id === applicant.athleteId); return { id: item.id, name: applicant?.name || 'Atleta', nickname: profile?.nickname || '', sex: profile?.sex || '', photo: profile?.photo || '' }; });
+    },
+    async decideJoin(token, requestId, decision) {
+      return repository.transaction(() => {
+        const { user, group } = requireSession(token);
+        if (user.role !== 'organizer') error('Só o organizador pode aprovar atletas.', 403);
+        const request = repository.requestById(identifier(requestId, 'Pedido'));
+        const requestGroupId = request?.group_id || request?.groupId, requestUserId = request?.user_id || request?.userId;
+        if (!request || requestGroupId !== group.id || request.status !== 'pending') error('Pedido não encontrado.', 404);
+        if (decision !== 'approve' && decision !== 'reject') error('Decisão inválida.');
+        if (decision === 'reject') { repository.updateRequest(request.id, 'rejected'); return { ok: true }; }
+        const applicant = repository.userById(requestUserId), source = applicant && repository.groupById(applicant.groupId);
+        if (!applicant || !source?.state.profileOnly) error('Este atleta já entrou em outra pelada.', 409);
+        const profile = source.state.athletes.find(a => a.id === applicant.athleteId);
+        if (!profile || group.state.athletes.length >= 300) error('Não foi possível adicionar este atleta.');
+        group.state.athletes.push(profile); group.revision++; repository.updateGroup(group);
+        repository.updateUserMembership(applicant.id, group.id, 'member'); repository.updateRequest(request.id, 'approved'); repository.deleteGroup(source.id);
+        return { ok: true };
+      });
+    },
     async saveState(token, input = {}) {
       return repository.transaction(() => {
         const { user, group } = requireSession(token);

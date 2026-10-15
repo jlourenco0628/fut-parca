@@ -13,6 +13,11 @@ export function createAccountClient({onSession,onSignedOut,onError}) {
     async ready(){try{publish(await request('/api/session'));}catch(err){if(err.code!==401)onError('O modo de contas está indisponível. A demonstração continua funcionando.');}},
     async login(data){const captured=++generation;const next=await request('/api/login','POST',data);if(captured===generation)publish(next);},
     async register(data){const captured=++generation;const next=await request('/api/register','POST',data);if(captured===generation)publish(next);},
+    searchGroups(query=''){return request(`/api/peladas?q=${encodeURIComponent(query)}`);},
+    async createGroup(data){const next=await request('/api/peladas','POST',data);publish(next);return next;},
+    requestJoin(groupId){return request('/api/pelada-request','POST',{groupId});},
+    joinRequests(){return request('/api/pelada-requests');},
+    decideJoin(requestId,decision){return request('/api/pelada-request-action','POST',{requestId,decision});},
     async logout(){await pending;generation++;await request('/api/logout','POST',{});current=null;onSignedOut();},
     async deleteAccount(data){await pending;generation++;await request('/api/account','DELETE',data);current=null;onSignedOut();},
     save(nextState){
