@@ -1,4 +1,4 @@
-const CACHE = 'fut-parca-shell-v4';
+const CACHE = 'fut-parca-shell-v5';
 const SHELL = [
   './', './index.html', './styles.css', './theme.css', './card.css', './goal.css',
   './theme-init.js', './app.js', './account_client.mjs', './card.mjs', './domain.mjs', './seed.mjs',

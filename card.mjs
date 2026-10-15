@@ -17,14 +17,21 @@ const brazilFlag = '<svg class="athlete-card__flag" viewBox="0 0 32 22" aria-lab
 const clubBadge = '<span class="athlete-card__badge" aria-label="Fut Parça" role="img"></span>';
 
 function portrait(id) {
+  const presets = {
+    'avatar-1': { skin:'#d6a481', jersey:'#173344', hair:0, female:false },
+    'avatar-2': { skin:'#70442e', jersey:'#143f35', hair:1, female:false },
+    'avatar-3': { skin:'#e1b18e', jersey:'#353c70', hair:2, female:true },
+    'avatar-4': { skin:'#75462f', jersey:'#6a2948', hair:0, female:true },
+  };
+  const preset = presets[id];
   let seed = 0;
   for (const letter of String(id || 'parca')) seed = (seed * 31 + letter.charCodeAt(0)) >>> 0;
   const skins = ['#b7754e', '#d6a481', '#865638', '#c98f69', '#9f6b4b'];
   const jerseys = ['#143f35', '#173344', '#1e493b', '#353c29'];
-  const skin = skins[seed % skins.length];
-  const jersey = jerseys[(seed >>> 3) % jerseys.length];
-  const hair = seed % 3;
-  const hairShape = hair === 0 ? '<path d="M52 66C48 29 107 21 116 61L111 74 105 49 64 51 56 78Z" fill="#221c19"/><path d="M61 48 58 40 68 36 73 28 84 33 95 28 103 35 113 40 110 55Z" fill="#221c19"/>' : hair === 1 ? '<path d="M52 70C46 30 102 25 115 53L115 73 108 57C92 52 86 42 70 52L59 79Z" fill="#2c221c"/>' : '<path d="M54 60C62 33 98 32 111 59L108 50C92 38 73 40 59 51Z" fill="#29221c"/>';
+  const skin = preset?.skin || skins[seed % skins.length];
+  const jersey = preset?.jersey || jerseys[(seed >>> 3) % jerseys.length];
+  const hair = preset?.hair ?? seed % 3;
+  const hairShape = preset?.female ? '<path d="M48 91Q43 35 84 30Q125 36 120 94L112 107 107 55Q85 39 62 55L58 108Z" fill="#241c1b"/><path d="M51 70Q49 32 85 31Q117 33 118 67 106 48 87 45 67 47 55 68Z" fill="#241c1b"/>' : hair === 0 ? '<path d="M52 66C48 29 107 21 116 61L111 74 105 49 64 51 56 78Z" fill="#221c19"/><path d="M61 48 58 40 68 36 73 28 84 33 95 28 103 35 113 40 110 55Z" fill="#221c19"/>' : hair === 1 ? '<path d="M52 70C46 30 102 25 115 53L115 73 108 57C92 52 86 42 70 52L59 79Z" fill="#2c221c"/>' : '<path d="M54 60C62 33 98 32 111 59L108 50C92 38 73 40 59 51Z" fill="#29221c"/>';
   return `<svg class="athlete-card__portrait" viewBox="0 0 170 210" aria-hidden="true"><path d="M16 210 22 153Q27 136 62 127L108 127Q143 136 148 153L155 210Z" fill="${jersey}"/><path d="m62 127 7-28h32l7 28-23 20Z" fill="${skin}"/><path d="m66 124 19 13 19-13 10 5-29 24-29-24Z" fill="#dfc97d"/><path d="M53 62Q54 39 82 37Q109 39 114 62L110 92Q102 119 85 122Q65 118 56 94Z" fill="${skin}"/><ellipse cx="53" cy="79" rx="5" ry="11" fill="${skin}"/><ellipse cx="114" cy="79" rx="5" ry="11" fill="${skin}"/>${hairShape}<path d="M64 71q8-4 15-1M91 70q8-3 14 1" stroke="#433026" stroke-width="2.8" fill="none" stroke-linecap="round"/><ellipse cx="72" cy="77" rx="2" ry="2.4" fill="#291f1a"/><ellipse cx="99" cy="77" rx="2" ry="2.4" fill="#291f1a"/><path d="m86 76-3 15 7 1" stroke="#8a563b" stroke-width="1.8" fill="none" stroke-linecap="round"/><path d="M74 102q11 6 22-1" stroke="#6a3f30" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M65 95q3 18 20 21 15-2 21-18-3 24-22 26-18-5-19-29Z" fill="#32251e" opacity=".2"/><path d="M30 154 41 210M140 154 129 210" stroke="#fff" stroke-opacity=".13" stroke-width="2"/><path d="m39 147 15-6 6 14-15 6Z" fill="#e7d18a"/><path d="M112 141h13v15h-13Z" fill="#e7d18a"/><path d="M65 177h40" stroke="#e7d18a" stroke-width="3" stroke-linecap="round"/><path d="M71 183h28" stroke="#e7d18a" stroke-width="1.5" stroke-linecap="round"/></svg>`;
 }
 

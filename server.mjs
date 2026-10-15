@@ -120,7 +120,7 @@ async function api(req, res, pathname, url) {
   }
   if (pathname === '/api/register' && req.method === 'POST') {
     rateLimit(req, 'register', 10);
-    const result = await store.register(await bodyJSON(req));
+    const result = await store.register(await bodyJSON(req, 3 * 1024 * 1024));
     setCookie(res, result.token); return json(res, 201, result.session);
   }
   if (pathname === '/api/login' && req.method === 'POST') {
