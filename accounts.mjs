@@ -12,6 +12,7 @@ const PERSONAL_FIELDS = new Set(['name', 'nickname', 'contact', 'photo', 'avatar
 const EVENT_TYPES = new Map(EVENT_RULES.map(rule => [rule.type, rule]));
 const copy = value => structuredClone(value);
 const hashToken = token => createHash('sha256').update(token).digest('hex');
+const normalizedGroupName = value => String(value || '').normalize('NFKD').replace(/\p{Diacritic}/gu, '').trim().replace(/\s+/gu, ' ').toLocaleLowerCase('pt-BR');
 
 function error(message, status = 400) {
   const result = new Error(message);
@@ -374,6 +375,7 @@ export async function createAccountStore({ path } = {}) {
       const salt = randomBytes(16).toString('hex'), hash = (await scrypt(password, salt, 64)).toString('hex');
       return repository.transaction(() => {
         if (repository.userByEmail(email)) error('Já existe uma conta com este e-mail.', 409);
+        if (groupName && repository.allGroups().some(group => !group.state.profileOnly && normalizedGroupName(group.name) === normalizedGroupName(groupName))) error('Já existe uma pelada com este nome. Escolha outro.', 409);
         const athlete = newAthlete(name, email, input.profile || input);
         let group;
         if (inviteCode) {
@@ -428,19 +430,37 @@ export async function createAccountStore({ path } = {}) {
     },
     async getState(token) { const { user, group } = requireSession(token); return publicSession(user, group); },
     async searchGroups(query = '') {
-      const term = String(query || '').trim().toLocaleLowerCase('pt-BR').slice(0, 80);
-      return repository.allGroups().filter(group => !group.state.profileOnly && (!term || group.name.toLocaleLowerCase('pt-BR').includes(term))).slice(0, 40).map(group => ({ id: group.id, name: group.name, logo: group.state.logo || '', weeklyDay: group.state.weeklyDay || '', weeklyTime: group.state.weeklyTime || '', members: group.state.athletes.length }));
+      const raw = String(query || '').trim().slice(0, 100), term = normalizedGroupName(raw);
+      return repository.allGroups().filter(group => !group.state.profileOnly && (!term || normalizedGroupName(group.name).includes(term) || group.id.toLocaleLowerCase('pt-BR').includes(raw.toLocaleLowerCase('pt-BR')) || group.inviteCode.toLocaleLowerCase('pt-BR').includes(raw.toLocaleLowerCase('pt-BR')))).slice(0, 40).map(group => ({ id: group.id, publicId: group.inviteCode, name: group.name, logo: group.state.logo || '', weeklyDay: group.state.weeklyDay || '', weeklyTime: group.state.weeklyTime || '', members: group.state.athletes.length }));
     },
     async createGroup(token, input = {}) {
       return repository.transaction(() => {
         const { user, group } = requireSession(token);
         if (!group.state.profileOnly) error('Você já faz parte de uma pelada.', 409);
-        group.name = text(input.name, 'Nome da pelada', 80, 2);
+        const name = text(input.name, 'Nome da pelada', 80, 2);
+        if (repository.allGroups().some(item => item.id !== group.id && !item.state.profileOnly && normalizedGroupName(item.name) === normalizedGroupName(name))) error('Já existe uma pelada com este nome. Escolha outro.', 409);
+        group.name = name;
         validatePhoto(String(input.logo || ''));
         group.state = { ...group.state, profileOnly: false, logo: String(input.logo || ''), weeklyDay: text(input.weeklyDay, 'Dia da semana', 12), weeklyTime: text(input.weeklyTime, 'Horário', 5) };
         if (!/^\d{2}:\d{2}$/.test(group.state.weeklyTime)) error('Horário inválido.');
         group.revision++; repository.updateGroup(group); repository.updateUserRole(user.id, 'organizer'); user.role = 'organizer';
         return publicSession(user, group);
+      });
+    },
+    async joinByInvite(token, inviteCode) {
+      return repository.transaction(() => {
+        const { user, group } = requireSession(token);
+        if (!group.state.profileOnly) error('Você já faz parte de uma pelada.', 409);
+        const code = text(inviteCode, 'Convite', 24).toUpperCase();
+        const target = repository.groupByInvite(code);
+        if (!target || target.state.profileOnly || target.id === group.id) error('Link de convite inválido ou expirado.', 404);
+        if (target.state.athletes.length >= 300) error('Esta pelada atingiu o limite de atletas.', 409);
+        const profile = group.state.athletes.find(athlete => athlete.id === user.athleteId);
+        if (!profile) error('Seu perfil de atleta não foi encontrado.', 409);
+        target.state.athletes.push(profile); target.revision++; repository.updateGroup(target);
+        repository.updateUserMembership(user.id, target.id, 'member'); repository.deleteGroup(group.id);
+        user.groupId = target.id; user.role = 'member';
+        return publicSession(user, target);
       });
     },
     async requestJoin(token, groupId) {

@@ -229,6 +229,24 @@ export function getSeasonRanking(state, modality) {
   return ranked([...rows.values()].filter(row => row.playedRounds > 0).sort((a, b) => b.points - a.points || b.goals - a.goals || a.nickname.localeCompare(b.nickname, 'pt-BR')));
 }
 
+export function getWeeklyMvp(state, modality) {
+  validateModality(modality);
+  const latest = state.rounds
+    .filter(item => item.status === 'closed' && item.modality === modality)
+    .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))[0];
+  if (!latest) return null;
+  const winner = getRoundStats(state, latest.id).find(row => row.playedMatches > 0);
+  return winner ? { ...winner, roundId: latest.id, date: latest.date } : null;
+}
+
+export function getCardTier(overall, weeklyMvp = false) {
+  if (weeklyMvp) return 'special';
+  const rating = Math.max(1, Math.min(99, Math.round(Number(overall) || 1)));
+  if (rating < 70) return 'bronze';
+  if (rating <= 75) return 'silver';
+  return 'gold';
+}
+
 export function getAthleteSkills(state, athleteId, modality) {
   validateModality(modality);
   const athlete = athleteOf(state, athleteId);

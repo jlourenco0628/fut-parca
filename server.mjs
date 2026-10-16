@@ -143,6 +143,7 @@ async function api(req, res, pathname, url) {
   }
   if (pathname === '/api/peladas' && req.method === 'GET') return json(res, 200, await store.searchGroups(url.searchParams.get('q') || ''));
   if (pathname === '/api/peladas' && req.method === 'POST') return json(res, 201, await store.createGroup(sessionToken(req), await bodyJSON(req, 2500000)));
+  if (pathname === '/api/pelada-convite' && req.method === 'POST') { const body = await bodyJSON(req); return json(res, 200, await store.joinByInvite(sessionToken(req), body.inviteCode)); }
   if (pathname === '/api/pelada-request' && req.method === 'POST') { const body = await bodyJSON(req); return json(res, 201, await store.requestJoin(sessionToken(req), body.groupId)); }
   if (pathname === '/api/pelada-requests' && req.method === 'GET') return json(res, 200, await store.joinRequests(sessionToken(req)));
   if (pathname === '/api/pelada-request-action' && req.method === 'POST') { const body = await bodyJSON(req); return json(res, 200, await store.decideJoin(sessionToken(req), body.requestId, body.decision)); }

@@ -15,6 +15,7 @@ export function createAccountClient({onSession,onSignedOut,onError}) {
     async register(data){const captured=++generation;const next=await request('/api/register','POST',data);if(captured===generation)publish(next);},
     searchGroups(query=''){return request(`/api/peladas?q=${encodeURIComponent(query)}`);},
     async createGroup(data){const next=await request('/api/peladas','POST',data);publish(next);return next;},
+    async joinByInvite(inviteCode){const next=await request('/api/pelada-convite','POST',{inviteCode});publish(next);return next;},
     requestJoin(groupId){return request('/api/pelada-request','POST',{groupId});},
     joinRequests(){return request('/api/pelada-requests');},
     decideJoin(requestId,decision){return request('/api/pelada-request-action','POST',{requestId,decision});},
