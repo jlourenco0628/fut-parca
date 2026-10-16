@@ -100,6 +100,22 @@ test('valida senha mínima, e-mail único, convite e credenciais incorretas', as
   await assert.rejects(store.getState('token-invalido'), status(401));
 });
 
+test('peladas têm nome único, busca por nome ou ID e entrada direta pelo link', async t => {
+  const { store, admin } = await fixture(t, false);
+  const profile = await store.register({ name: 'Convidado Teste', email: 'convidado@example.com', password: 'senha-convidado-123' });
+  await assert.rejects(store.createGroup(profile.token, { name: '  Túrma   dos testes ', weeklyDay: 'Quarta', weeklyTime: '20:00' }), status(409));
+  await assert.rejects(store.register({ name: 'Outro Organizador', email: 'outro-organizador@example.com', password: 'senha-organizador-123', groupName: 'TURMA DOS TESTES' }), status(409));
+  const byName = await store.searchGroups('turma dos');
+  const byId = await store.searchGroups(admin.session.group.inviteCode.toLowerCase());
+  assert.equal(byName[0].id, admin.session.group.id);
+  assert.equal(byId[0].publicId, admin.session.group.inviteCode);
+  const joined = await store.joinByInvite(profile.token, admin.session.group.inviteCode.toLowerCase());
+  assert.equal(joined.group.id, admin.session.group.id);
+  assert.equal(joined.group.role, 'member');
+  assert.equal(joined.state.athletes.length, 2);
+  await assert.rejects(store.joinByInvite(profile.token, admin.session.group.inviteCode), status(409));
+});
+
 test('logout invalida somente o token utilizado e sessões expiram em sete dias', async t => {
   const { store, path, admin } = await fixture(t, false);
   const other = await store.login({ email: 'organizador@example.com', password: 'senha-ficticia-123' });

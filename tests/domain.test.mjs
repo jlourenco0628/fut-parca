@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createSeed, EVENT_RULES, MODALITIES, getRoundStats, getMatchScore, getAthleteSkills,
   getFantasyRanking, getSeasonRanking, recordEvent, removeEvent, saveFantasy, beginRound,
-  setMatchStatus, closeRound, reopenRound, positionForRound, drawCaptains, drawTeams } from '../domain.mjs';
+  setMatchStatus, closeRound, reopenRound, positionForRound, drawCaptains, drawTeams,
+  getWeeklyMvp, getCardTier } from '../domain.mjs';
 
 const roundId = 'pelada-01';
 const draftId = 'pelada-02';
@@ -21,6 +22,18 @@ test('a demonstração fornece 15 atletas, três equipes e configurações por m
   assert.equal(MODALITIES.futsal.teamSize, 5);
   for (const athlete of seed.athletes) assert.deepEqual(Object.keys(athlete.preferences), ['futebol', 'futsal', 'society']);
   assert.equal(EVENT_RULES.find(rule => rule.type === 'save').points, 1.5);
+});
+
+test('cards usam bronze, prata, ouro e destaque semanal', () => {
+  assert.equal(getCardTier(60), 'bronze');
+  assert.equal(getCardTier(70), 'silver');
+  assert.equal(getCardTier(75), 'silver');
+  assert.equal(getCardTier(76), 'gold');
+  assert.equal(getCardTier(60, true), 'special');
+  assert.equal(getWeeklyMvp(createSeed(), 'futsal'), null);
+  const state = closed();
+  const expected = getRoundStats(state, roundId).find(row => row.playedMatches > 0);
+  assert.equal(getWeeklyMvp(state, 'futsal').athleteId, expected.athleteId);
 });
 
 test('sorteio de capitães usa apenas participantes, persiste no início e não pode ser refeito após começar', () => {
