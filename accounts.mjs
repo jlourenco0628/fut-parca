@@ -83,7 +83,7 @@ function validatePhoto(photo) {
 function publicSession(user, group) {
   return {
     user: { id: user.id, name: user.name, email: user.email },
-    group: { id: group.id, name: group.name, role: user.role, profileOnly: Boolean(group.state.profileOnly), logo: group.state.logo || '', weeklyDay: group.state.weeklyDay || '', weeklyTime: group.state.weeklyTime || '', ...(user.role === 'organizer' ? { inviteCode: group.inviteCode } : {}) },
+    group: { id: group.id, name: group.name, role: user.role, profileOnly: Boolean(group.state.profileOnly), logo: group.state.logo || '', scheduleType: group.state.scheduleType || 'recurring', weeklyDay: group.state.weeklyDay || '', weeklyTime: group.state.weeklyTime || '', singleDate: group.state.singleDate || '', singleTime: group.state.singleTime || '', ...(user.role === 'organizer' ? { inviteCode: group.inviteCode } : {}) },
     athleteId: user.athleteId, revision: group.revision, state: copy(group.state),
   };
 }
@@ -175,6 +175,9 @@ function validateState(input, previous, users) {
   if (input.version !== 1) error('Versão de estado inválida.');
   list(input.athletes, 'Atletas', 300);
   list(input.rounds, 'Peladas', 100);
+  if (input.scheduleType != null && !['recurring', 'single'].includes(input.scheduleType)) error('Tipo de pelada inválido.');
+  if (input.scheduleType === 'single' && input.rounds.length > 1) error('Uma pelada avulsa só pode ter um evento.', 409);
+  if (input.scheduleType === 'single' && input.rounds.some(round => round.date !== input.singleDate || round.time !== input.singleTime)) error('A data da pelada avulsa deve seguir a configuração da turma.', 409);
   const state = copy(input), athleteIds = new Set(), roundIds = new Set();
   const byAthlete = new Map();
   for (const athlete of state.athletes) {
@@ -431,7 +434,7 @@ export async function createAccountStore({ path } = {}) {
     async getState(token) { const { user, group } = requireSession(token); return publicSession(user, group); },
     async searchGroups(query = '') {
       const raw = String(query || '').trim().slice(0, 100), term = normalizedGroupName(raw);
-      return repository.allGroups().filter(group => !group.state.profileOnly && (!term || normalizedGroupName(group.name).includes(term) || group.id.toLocaleLowerCase('pt-BR').includes(raw.toLocaleLowerCase('pt-BR')) || group.inviteCode.toLocaleLowerCase('pt-BR').includes(raw.toLocaleLowerCase('pt-BR')))).slice(0, 40).map(group => ({ id: group.id, publicId: group.inviteCode, name: group.name, logo: group.state.logo || '', weeklyDay: group.state.weeklyDay || '', weeklyTime: group.state.weeklyTime || '', members: group.state.athletes.length }));
+      return repository.allGroups().filter(group => !group.state.profileOnly && (!term || normalizedGroupName(group.name).includes(term) || group.id.toLocaleLowerCase('pt-BR').includes(raw.toLocaleLowerCase('pt-BR')) || group.inviteCode.toLocaleLowerCase('pt-BR').includes(raw.toLocaleLowerCase('pt-BR')))).slice(0, 40).map(group => ({ id: group.id, publicId: group.inviteCode, name: group.name, logo: group.state.logo || '', scheduleType: group.state.scheduleType || 'recurring', weeklyDay: group.state.weeklyDay || '', weeklyTime: group.state.weeklyTime || '', singleDate: group.state.singleDate || '', singleTime: group.state.singleTime || '', members: group.state.athletes.length }));
     },
     async createGroup(token, input = {}) {
       return repository.transaction(() => {
@@ -441,8 +444,14 @@ export async function createAccountStore({ path } = {}) {
         if (repository.allGroups().some(item => item.id !== group.id && !item.state.profileOnly && normalizedGroupName(item.name) === normalizedGroupName(name))) error('Já existe uma pelada com este nome. Escolha outro.', 409);
         group.name = name;
         validatePhoto(String(input.logo || ''));
-        group.state = { ...group.state, profileOnly: false, logo: String(input.logo || ''), weeklyDay: text(input.weeklyDay, 'Dia da semana', 12), weeklyTime: text(input.weeklyTime, 'Horário', 5) };
-        if (!/^\d{2}:\d{2}$/.test(group.state.weeklyTime)) error('Horário inválido.');
+        const scheduleType = input.scheduleType === 'single' ? 'single' : 'recurring';
+        const weeklyDay = scheduleType === 'recurring' ? text(input.weeklyDay, 'Dia da semana', 12) : '';
+        const weeklyTime = scheduleType === 'recurring' ? text(input.weeklyTime, 'Horário', 5) : '';
+        const singleDate = scheduleType === 'single' ? text(input.singleDate, 'Data da pelada', 10) : '';
+        const singleTime = scheduleType === 'single' ? text(input.singleTime, 'Horário', 5) : '';
+        if (scheduleType === 'recurring' && (!['Segunda','Terça','Quarta','Quinta','Sexta','Sábado','Domingo'].includes(weeklyDay) || !/^\d{2}:\d{2}$/.test(weeklyTime))) error('Dia ou horário da pelada fixa inválido.');
+        if (scheduleType === 'single' && (!/^\d{4}-\d{2}-\d{2}$/.test(singleDate) || !Number.isFinite(Date.parse(singleDate)) || !/^\d{2}:\d{2}$/.test(singleTime))) error('Data ou horário da pelada avulsa inválido.');
+        group.state = { ...group.state, profileOnly: false, logo: String(input.logo || ''), scheduleType, weeklyDay, weeklyTime, singleDate, singleTime };
         group.revision++; repository.updateGroup(group); repository.updateUserRole(user.id, 'organizer'); user.role = 'organizer';
         return publicSession(user, group);
       });
