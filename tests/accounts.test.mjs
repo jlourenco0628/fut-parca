@@ -116,6 +116,25 @@ test('peladas têm nome único, busca por nome ou ID e entrada direta pelo link'
   await assert.rejects(store.joinByInvite(profile.token, admin.session.group.inviteCode), status(409));
 });
 
+test('pelada fixa guarda recorrência e pelada avulsa aceita somente um evento na data configurada', async t => {
+  const { store } = await fixture(t, false);
+  const recurringProfile = await store.register({ name: 'Fixo Teste', email: 'fixo@example.com', password: 'senha-fixa-123' });
+  const recurring = await store.createGroup(recurringProfile.token, { name: 'Futebol de Quarta', scheduleType: 'recurring', weeklyDay: 'Quarta', weeklyTime: '20:30' });
+  assert.equal(recurring.group.scheduleType, 'recurring');
+  assert.equal(recurring.group.weeklyDay, 'Quarta');
+  const singleProfile = await store.register({ name: 'Avulso Teste', email: 'avulso@example.com', password: 'senha-avulsa-123' });
+  const single = await store.createGroup(singleProfile.token, { name: 'Jogo Beneficente', scheduleType: 'single', singleDate: '2026-12-12', singleTime: '18:00' });
+  assert.equal(single.group.scheduleType, 'single');
+  assert.equal(single.group.singleDate, '2026-12-12');
+  const seed = createSeed(), event = { ...seed.rounds[1], id: 'evento-unico', title: 'Jogo Beneficente', date: '2026-12-12', time: '18:00', teams: [], matches: [], events: [], fantasy: [], confirmedAthleteIds: [single.athleteId] };
+  let current = await store.getState(singleProfile.token);
+  current.state.rounds = [event];
+  const saved = await store.saveState(singleProfile.token, { state: current.state, expectedRevision: current.revision });
+  assert.equal(saved.state.rounds.length, 1);
+  current = await store.getState(singleProfile.token); current.state.rounds.push({ ...event, id: 'evento-extra' });
+  await assert.rejects(store.saveState(singleProfile.token, { state: current.state, expectedRevision: current.revision }), status(409));
+});
+
 test('logout invalida somente o token utilizado e sessões expiram em sete dias', async t => {
   const { store, path, admin } = await fixture(t, false);
   const other = await store.login({ email: 'organizador@example.com', password: 'senha-ficticia-123' });
