@@ -129,6 +129,14 @@ async function openRepository(path) {
       insertSession(hash, userId, expiresAt) { db.prepare('DELETE FROM sessions WHERE expires_at<=?').run(Date.now()); db.prepare('INSERT INTO sessions VALUES (?,?,?)').run(hash, userId, expiresAt); },
       deleteSession(hash) { db.prepare('DELETE FROM sessions WHERE token_hash=?').run(hash); },
       deleteSessionsForUser(userId) { db.prepare('DELETE FROM sessions WHERE user_id=?').run(userId); },
+      storageStatus() {
+        return {
+          backend: 'sqlite',
+          journalMode: db.prepare('PRAGMA journal_mode').get().journal_mode,
+          foreignKeys: db.prepare('PRAGMA foreign_keys').get().foreign_keys === 1,
+          busyTimeout: db.prepare('PRAGMA busy_timeout').get().timeout,
+        };
+      },
       close() { db.close(); },
     };
   }
@@ -166,7 +174,9 @@ async function openRepository(path) {
     sessionByHash: hash => read(() => data.sessions.find(session => session.hash === hash)),
     insertSession(hash, userId, expiresAt) { data.sessions = data.sessions.filter(session => session.expiresAt > Date.now()); data.sessions.push({ hash, userId, expiresAt }); },
     deleteSession(hash) { data.sessions = data.sessions.filter(session => session.hash !== hash); },
-    deleteSessionsForUser(userId) { data.sessions = data.sessions.filter(session => session.userId !== userId); }, close() {},
+    deleteSessionsForUser(userId) { data.sessions = data.sessions.filter(session => session.userId !== userId); },
+    storageStatus() { return { backend: 'json', atomicWrites: true }; },
+    close() {},
   };
 }
 
@@ -371,6 +381,7 @@ export async function createAccountStore({ path } = {}) {
   const issueSession = user => { const token = randomBytes(32).toString('hex'); repository.insertSession(hashToken(token), user.id, Date.now() + SESSION_LIFETIME); return token; };
   return {
     backend: repository.kind,
+    async storageStatus() { return repository.storageStatus(); },
     async register(input = {}) {
       const name = text(input.name, 'Nome', 80, 2), email = emailOf(input.email), password = passwordOf(input.password);
       const inviteCode = input.inviteCode ? text(input.inviteCode, 'Convite', 24).toUpperCase() : '';
