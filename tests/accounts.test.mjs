@@ -67,6 +67,14 @@ test('senha e tokens são armazenados como hashes e não aparecem na sessão pú
   }
 });
 
+test('SQLite usa WAL, chaves estrangeiras e espera por escrita concorrente', async t => {
+  const { store } = await fixture(t, false);
+  const status = await store.storageStatus();
+  assert.equal(status.backend, 'sqlite');
+  assert.equal(status.journalMode, 'wal');
+  assert.equal(status.foreignKeys, true);
+  assert.equal(status.busyTimeout, 5000);
+});
 test('salt é individual mesmo quando duas contas usam a mesma senha', async t => {
   const { store, path, admin } = await fixture(t, false);
   await store.register({ name: 'Outro Teste', email: 'outro@example.com', password: 'senha-ficticia-123', inviteCode: admin.session.group.inviteCode.toLowerCase() });
@@ -317,3 +325,4 @@ test('salvar em uma turma não altera outra turma nem autoriza acesso com sessã
   assert.notEqual(second.session.group.id, admin.session.group.id);
   await assert.rejects(store.saveState('invalido', { state: current.state, expectedRevision: 1 }), status(401));
 });
+
