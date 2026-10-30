@@ -1,18 +1,17 @@
 import http from 'node:http';
-import { readFile, mkdir, writeFile, unlink, realpath } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
 import { resolve, dirname, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
 import { createAccountStore } from './accounts.mjs';
 import { MODALITIES, getMatchScore, getRoundStats, getFantasyRanking, getSeasonRanking } from './domain.mjs';
 import { serverConfig } from './server_config.mjs';
+import { generatePdfReport } from './pdf_report.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const config = serverConfig();
-const { port, python, reportDir, origins } = config;
-const store = await createAccountStore({ path: config.dataPath || resolve(root, '../../work/fut-parca.sqlite') });
+const { port, origins } = config;
+const localStore = config.databaseUrl || config.supabase ? null : await createAccountStore({ path: config.dataPath || resolve(root, '../../work/fut-parca.sqlite') });
 const cookieName = 'FPsession';
 const cookieAge = 7 * 24 * 60 * 60;
 const attempts = new Map();
@@ -82,34 +81,22 @@ function officialReport(session, roundId) {
   };
 }
 
-async function report(req, res) {
+async function report(req, res, store) {
   const token = sessionToken(req);
   if (config.publicOrigin && !token) fail(401, 'Entre na sua conta para gerar o PDF.', 'unauthorized');
   rateLimit(req, 'report', 20);
   const supplied = await bodyJSON(req, 1500000);
   const payload = token === null ? supplied : officialReport(await store.getState(token), supplied.roundId);
-  const id = randomUUID();
-  const input = resolve(reportDir, `${id}.json`), output = resolve(reportDir, `${id}.pdf`);
-  await mkdir(reportDir, { recursive:true });
-  await writeFile(input, JSON.stringify(payload), 'utf8');
   try {
-    await new Promise((yes, no) => {
-      const proc = spawn(python, [resolve(root, 'pdf_report.py'), '--input', input, '--output', output], { windowsHide:true, stdio:['ignore', 'ignore', 'pipe'] });
-      let stderr = '';
-      proc.stderr.on('data', value => { stderr = (stderr + value.toString()).slice(-12000); });
-      const timeout = setTimeout(() => { proc.kill(); no(new Error('A geração do PDF excedeu o tempo limite.')); }, 30000);
-      proc.on('error', () => { clearTimeout(timeout); no(new Error('Python indisponível. Configure FUT_PARCA_PYTHON.')); });
-      proc.on('close', code => { clearTimeout(timeout); code === 0 ? yes() : no(new Error(stderr.trim().split('\n').at(-1) || 'Não foi possível gerar o PDF.')); });
-    });
-    const file = await readFile(output);
+    const file = await generatePdfReport(payload);
     res.writeHead(200, { 'Content-Type':'application/pdf', 'Content-Disposition':'attachment; filename="fut-parca-resultados.pdf"', 'Content-Length':file.length, 'Cache-Control':'no-store' });
     res.end(file);
   } catch (cause) {
     error(res, 400, cause.message);
-  } finally { await Promise.allSettled([unlink(input), unlink(output)]); }
+  }
 }
 
-async function api(req, res, pathname, url) {
+async function api(req, res, pathname, url, store) {
   if (!['GET', 'HEAD'].includes(req.method)) mutationOrigin(req);
   if (pathname === '/api/health' && req.method === 'GET') return json(res, 200, { ok:true });
   if (pathname === '/api/config' && req.method === 'GET') return json(res, 200, { public:Boolean(config.publicOrigin) });
@@ -147,17 +134,19 @@ async function api(req, res, pathname, url) {
   if (pathname === '/api/pelada-request' && req.method === 'POST') { const body = await bodyJSON(req); return json(res, 201, await store.requestJoin(sessionToken(req), body.groupId)); }
   if (pathname === '/api/pelada-requests' && req.method === 'GET') return json(res, 200, await store.joinRequests(sessionToken(req)));
   if (pathname === '/api/pelada-request-action' && req.method === 'POST') { const body = await bodyJSON(req); return json(res, 200, await store.decideJoin(sessionToken(req), body.requestId, body.decision)); }
-  if (pathname === '/api/report' && req.method === 'POST') return report(req, res);
+  if (pathname === '/api/report' && req.method === 'POST') return report(req, res, store);
   return error(res, 404, 'Recurso não encontrado.');
 }
 
-const server = http.createServer(async (req, res) => {
+export async function handler(req, res) {
+  let requestStore;
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'");
   try {
+    requestStore = localStore || await createAccountStore({ databaseUrl: config.databaseUrl, supabase: config.supabase });
     const url = new URL(req.url, `http://127.0.0.1:${port}`);
-    if (url.pathname.startsWith('/api/')) return await api(req, res, url.pathname, url);
+    if (url.pathname.startsWith('/api/')) return await api(req, res, url.pathname, url, requestStore);
     if (req.method !== 'GET' && req.method !== 'HEAD') return error(res, 405, 'Método não permitido.');
     const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'index.html';
     const path = resolve(root, rel);
@@ -175,7 +164,16 @@ const server = http.createServer(async (req, res) => {
       const message = cause.code === 'ENOENT' ? 'Arquivo não encontrado.' : status < 500 ? cause.message : 'Não foi possível abrir este recurso.';
       error(res, status >= 400 && status <= 599 ? status : 500, message, typeof cause.code === 'string' && cause.status ? cause.code : undefined);
     } else res.end();
+  } finally {
+    if (!localStore && requestStore) await requestStore.close();
   }
-});
-server.on('error', cause => { console.error(`Não foi possível iniciar o Fut Parça: ${cause.message}`); process.exitCode = 1; });
-server.listen(port, config.host, () => console.log(`Fut Parça disponível em ${config.publicOrigin || `http://127.0.0.1:${port}`}`));
+}
+
+export default handler;
+
+const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  const server = http.createServer(handler);
+  server.on('error', cause => { console.error(`Não foi possível iniciar o Fut Parça: ${cause.message}`); process.exitCode = 1; });
+  server.listen(port, config.host, () => console.log(`Fut Parça disponível em ${config.publicOrigin || `http://127.0.0.1:${port}`}`));
+}

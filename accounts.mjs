@@ -13,6 +13,7 @@ const EVENT_TYPES = new Map(EVENT_RULES.map(rule => [rule.type, rule]));
 const copy = value => structuredClone(value);
 const hashToken = token => createHash('sha256').update(token).digest('hex');
 const normalizedGroupName = value => String(value || '').normalize('NFKD').replace(/\p{Diacritic}/gu, '').trim().replace(/\s+/gu, ' ').toLocaleLowerCase('pt-BR');
+let postgresPool;
 
 function error(message, status = 400) {
   const result = new Error(message);
@@ -88,7 +89,140 @@ function publicSession(user, group) {
   };
 }
 
-async function openRepository(path) {
+function normalizeRepositoryData(value) {
+  const data = value && typeof value === 'object' ? value : {};
+  return {
+    version: 2,
+    users: Array.isArray(data.users) ? data.users : [],
+    groups: Array.isArray(data.groups) ? data.groups : [],
+    sessions: Array.isArray(data.sessions) ? data.sessions : [],
+    joinRequests: Array.isArray(data.joinRequests) ? data.joinRequests : [],
+  };
+}
+
+async function supabaseRpc(url, key, name, input) {
+  const response = await fetch(`${url.replace(/\/$/u, '')}/rest/v1/rpc/${name}`, {
+    method: 'POST',
+    headers: { apikey: key, authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    const cause = new Error(response.status === 403 ? 'Conexão do banco não autorizada.' : 'Não foi possível acessar o banco compartilhado.');
+    cause.status = 502;
+    cause.code = detail.code || 'supabase_rpc_failed';
+    throw cause;
+  }
+  return response.json();
+}
+
+async function openSupabaseRepository({ url, key, secret }) {
+  const readSnapshot = async () => {
+    const snapshot = await supabaseRpc(url, key, 'fut_parca_read', { p_secret: secret });
+    return { data: normalizeRepositoryData(snapshot?.data), revision: Number(snapshot?.revision || 0) };
+  };
+  let snapshot = await readSnapshot(), data = snapshot.data;
+  const read = fn => fn();
+  const repository = {
+    kind: 'supabase', path: 'private.fut_parca_store',
+    async transaction(fn) {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        if (attempt) snapshot = await readSnapshot();
+        data = normalizeRepositoryData(snapshot.data);
+        const previous = copy(data);
+        let result;
+        try { result = fn(); } catch (cause) { data = previous; throw cause; }
+        const committed = await supabaseRpc(url, key, 'fut_parca_compare_and_swap', {
+          p_secret: secret,
+          p_expected_revision: snapshot.revision,
+          p_next: data,
+        });
+        if (committed === true) { snapshot = { data: copy(data), revision: snapshot.revision + 1 }; return result; }
+      }
+      error('Os dados foram atualizados ao mesmo tempo em outro aparelho. Tente novamente.', 409);
+    },
+    userByEmail: email => read(() => data.users.find(user => user.email === email)), userById: id => read(() => data.users.find(user => user.id === id)),
+    usersForGroup: id => read(() => data.users.filter(user => user.groupId === id)), groupById: id => read(() => data.groups.find(group => group.id === id)),
+    groupByInvite: code => read(() => data.groups.find(group => group.inviteCode === code)), insertGroup: group => data.groups.push(copy(group)),
+    allGroups: () => read(() => data.groups.map(copy)),
+    updateGroup(group) { data.groups[data.groups.findIndex(item => item.id === group.id)] = copy(group); },
+    deleteGroup(id) { data.groups = data.groups.filter(group => group.id !== id); },
+    insertUser: user => data.users.push(copy(user)),
+    updateUserRole(id, role) { const user = data.users.find(item => item.id === id); if (user) user.role = role; },
+    updateUserMembership(id, groupId, role) { const user = data.users.find(item => item.id === id); if (user) { user.groupId = groupId; user.role = role; } },
+    requestByUserGroup: (userId, groupId) => read(() => data.joinRequests.find(item => item.userId === userId && item.groupId === groupId)),
+    requestsForGroup: groupId => read(() => data.joinRequests.filter(item => item.groupId === groupId)),
+    requestById: id => read(() => data.joinRequests.find(item => item.id === id)),
+    insertRequest: request => data.joinRequests.push(copy(request)),
+    updateRequest(id, status) { const item = data.joinRequests.find(request => request.id === id); if (item) item.status = status; },
+    deleteUser(id) { data.users = data.users.filter(user => user.id !== id); },
+    sessionByHash: hash => read(() => data.sessions.find(session => session.hash === hash)),
+    insertSession(hash, userId, expiresAt) { data.sessions = data.sessions.filter(session => session.expiresAt > Date.now()); data.sessions.push({ hash, userId, expiresAt }); },
+    deleteSession(hash) { data.sessions = data.sessions.filter(session => session.hash !== hash); },
+    deleteSessionsForUser(userId) { data.sessions = data.sessions.filter(session => session.userId !== userId); },
+    storageStatus() { return { backend: 'supabase', table: 'private.fut_parca_store', compareAndSwap: true }; },
+    close() {},
+  };
+  return repository;
+}
+
+async function openPostgresRepository(databaseUrl) {
+  const { Pool } = await import('pg');
+  postgresPool ||= new Pool({ connectionString: databaseUrl, max: 4, idleTimeoutMillis: 20000, connectionTimeoutMillis: 10000 });
+  const initial = await postgresPool.query("SELECT data FROM private.fut_parca_store WHERE id='main'");
+  if (!initial.rowCount) throw new Error('Banco do Fut Parça ainda não foi inicializado.');
+  let data = normalizeRepositoryData(initial.rows[0].data);
+  const read = fn => fn();
+  return {
+    kind: 'postgres', path: 'private.fut_parca_store',
+    async transaction(fn) {
+      const client = await postgresPool.connect();
+      try {
+        await client.query('BEGIN');
+        const locked = await client.query("SELECT data FROM private.fut_parca_store WHERE id='main' FOR UPDATE");
+        data = normalizeRepositoryData(locked.rows[0]?.data);
+        const previous = copy(data);
+        try {
+          const result = fn();
+          await client.query("UPDATE private.fut_parca_store SET data=$1::jsonb, updated_at=now() WHERE id='main'", [JSON.stringify(data)]);
+          await client.query('COMMIT');
+          return result;
+        } catch (cause) {
+          data = previous;
+          throw cause;
+        }
+      } catch (cause) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw cause;
+      } finally { client.release(); }
+    },
+    userByEmail: email => read(() => data.users.find(user => user.email === email)), userById: id => read(() => data.users.find(user => user.id === id)),
+    usersForGroup: id => read(() => data.users.filter(user => user.groupId === id)), groupById: id => read(() => data.groups.find(group => group.id === id)),
+    groupByInvite: code => read(() => data.groups.find(group => group.inviteCode === code)), insertGroup: group => data.groups.push(copy(group)),
+    allGroups: () => read(() => data.groups.map(copy)),
+    updateGroup(group) { data.groups[data.groups.findIndex(item => item.id === group.id)] = copy(group); },
+    deleteGroup(id) { data.groups = data.groups.filter(group => group.id !== id); },
+    insertUser: user => data.users.push(copy(user)),
+    updateUserRole(id, role) { const user = data.users.find(item => item.id === id); if (user) user.role = role; },
+    updateUserMembership(id, groupId, role) { const user = data.users.find(item => item.id === id); if (user) { user.groupId = groupId; user.role = role; } },
+    requestByUserGroup: (userId, groupId) => read(() => data.joinRequests.find(item => item.userId === userId && item.groupId === groupId)),
+    requestsForGroup: groupId => read(() => data.joinRequests.filter(item => item.groupId === groupId)),
+    requestById: id => read(() => data.joinRequests.find(item => item.id === id)),
+    insertRequest: request => data.joinRequests.push(copy(request)),
+    updateRequest(id, status) { const item = data.joinRequests.find(request => request.id === id); if (item) item.status = status; },
+    deleteUser(id) { data.users = data.users.filter(user => user.id !== id); },
+    sessionByHash: hash => read(() => data.sessions.find(session => session.hash === hash)),
+    insertSession(hash, userId, expiresAt) { data.sessions = data.sessions.filter(session => session.expiresAt > Date.now()); data.sessions.push({ hash, userId, expiresAt }); },
+    deleteSession(hash) { data.sessions = data.sessions.filter(session => session.hash !== hash); },
+    deleteSessionsForUser(userId) { data.sessions = data.sessions.filter(session => session.userId !== userId); },
+    storageStatus() { return { backend: 'postgres', table: 'private.fut_parca_store', transactionLocking: true }; },
+    close() {},
+  };
+}
+
+async function openRepository(path, databaseUrl, supabase) {
+  if (supabase?.url && supabase?.key && supabase?.secret) return openSupabaseRepository(supabase);
+  if (databaseUrl) return openPostgresRepository(databaseUrl);
   mkdirSync(dirname(path), { recursive: true });
   let sqlite;
   try { sqlite = await import('node:sqlite'); } catch (err) {
@@ -364,9 +498,9 @@ function withoutAccountData(state, user) {
   };
 }
 
-export async function createAccountStore({ path } = {}) {
-  if (typeof path !== 'string' || !path) error('Informe o arquivo do banco de contas.');
-  const repository = await openRepository(path);
+export async function createAccountStore({ path, databaseUrl, supabase } = {}) {
+  if (!databaseUrl && !supabase && (typeof path !== 'string' || !path)) error('Informe o banco de contas.');
+  const repository = await openRepository(path, databaseUrl, supabase);
   let closed = false;
   const lookup = token => {
     if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) return null;
@@ -415,10 +549,10 @@ export async function createAccountStore({ path } = {}) {
       const candidate = await scrypt(input.password, user?.salt || 'fut-parca-invalid-account', 64);
       const expected = user ? Buffer.from(user.hash, 'hex') : Buffer.alloc(64);
       if (!user || candidate.length !== expected.length || !timingSafeEqual(candidate, expected)) error('E-mail ou senha incorretos.', 401);
-      return repository.transaction(() => ({ token: issueSession(user), session: publicSession(user, repository.groupById(user.groupId)) }));
+      return repository.transaction(() => { const current = repository.userById(user.id); return { token: issueSession(current), session: publicSession(current, repository.groupById(current.groupId)) }; });
     },
     async session(token) { const current = lookup(token); return current ? publicSession(current.user, current.group) : null; },
-    async logout(token) { if (typeof token === 'string' && /^[a-f0-9]{64}$/.test(token)) repository.transaction(() => repository.deleteSession(hashToken(token))); return { ok: true }; },
+    async logout(token) { if (typeof token === 'string' && /^[a-f0-9]{64}$/.test(token)) await repository.transaction(() => repository.deleteSession(hashToken(token))); return { ok: true }; },
     async deleteAccount(token, input = {}) {
       const current = requireSession(token);
       if (typeof input.password !== 'string' || input.password.length > 128) error('Senha incorreta.', 401);
