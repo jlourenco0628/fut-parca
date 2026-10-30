@@ -25,3 +25,29 @@ test('modo público exige HTTPS e armazenamento absoluto, ativa cookie Secure e 
   assert.throws(() => serverConfig({ FUT_PARCA_PUBLIC_ORIGIN:'https://futparca.onrender.com' }), /armazenamento persistente/);
   assert.throws(() => serverConfig({ PORT:'0' }), /PORT/);
 });
+
+test('Vercel fornece a origem pública e o PostgreSQL substitui o arquivo persistente', () => {
+  const config = serverConfig({
+    VERCEL_PROJECT_PRODUCTION_URL:'fut-parca.vercel.app',
+    DATABASE_URL:'postgresql://example.invalid/fut_parca',
+  });
+  assert.equal(config.publicOrigin, 'https://fut-parca.vercel.app');
+  assert.equal(config.secureCookie, true);
+  assert.equal(config.databaseUrl, 'postgresql://example.invalid/fut_parca');
+  assert.deepEqual([...config.origins], ['https://fut-parca.vercel.app']);
+});
+
+test('Supabase exige as três credenciais e substitui o arquivo persistente', () => {
+  const config = serverConfig({
+    VERCEL_PROJECT_PRODUCTION_URL:'fut-parca.vercel.app',
+    SUPABASE_URL:'https://example.supabase.co',
+    SUPABASE_PUBLISHABLE_KEY:'sb_publishable_example',
+    FUT_PARCA_DB_SECRET:'segredo-interno',
+  });
+  assert.deepEqual(config.supabase, {
+    url:'https://example.supabase.co',
+    key:'sb_publishable_example',
+    secret:'segredo-interno',
+  });
+  assert.throws(() => serverConfig({ SUPABASE_URL:'https://example.supabase.co' }), /juntas/);
+});
