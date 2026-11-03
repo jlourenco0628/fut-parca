@@ -40,20 +40,20 @@
 .athlete-card .athlete-card__flag { display: block; width: 12.3cqw; height: auto; box-shadow: 0 1px 2px rgb(0 0 0 / .07); }
 .athlete-card .athlete-card__badge { display: block; position: absolute; top: 46%; left: 16.6%; width: 13cqw; height: 11.5cqw; z-index: 4; background: url('./logo-fut-parca.jpeg') -8.5cqw -6.5cqw / 30cqw 30cqw no-repeat; filter: contrast(3) grayscale(1) invert(1); mix-blend-mode: multiply; }
 .athlete-card .athlete-card__photo { position: absolute; left: 33%; top: 12%; width: 60%; height: 43%; z-index: 2; overflow: hidden; -webkit-mask-image: radial-gradient(ellipse 69% 76% at 50% 43%, #000 48%, rgb(0 0 0 / .96) 61%, transparent 100%); mask-image: radial-gradient(ellipse 69% 76% at 50% 43%, #000 48%, rgb(0 0 0 / .96) 61%, transparent 100%); }
-.athlete-card .athlete-card__photo--uploaded { left: 39%; top: 15%; width: 49%; height: 36%; border-radius: 50%; clip-path: ellipse(49% 49% at 50% 50%); -webkit-mask-image: none; mask-image: none; background: rgb(246 224 161 / .55); box-shadow: inset 0 0 0 1px rgb(91 65 20 / .18), 0 3px 9px rgb(74 51 12 / .14); }
+.athlete-card .athlete-card__photo--uploaded { left: 31%; top: 9%; width: 66%; height: 49%; border-radius: 0; clip-path: none; background: transparent; box-shadow: none; -webkit-mask-image: radial-gradient(ellipse 78% 91% at 52% 40%, #000 45%, rgb(0 0 0 / .94) 62%, rgb(0 0 0 / .42) 78%, transparent 100%); mask-image: radial-gradient(ellipse 78% 91% at 52% 40%, #000 45%, rgb(0 0 0 / .94) 62%, rgb(0 0 0 / .42) 78%, transparent 100%); }
 .athlete-card .athlete-card__portrait { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center bottom; }
-.athlete-card .athlete-card__portrait--photo { object-fit: cover; object-position: center 28%; transform: scale(1.04); transform-origin: center 35%; }
-.athlete-card .athlete-card__photo--uploaded .athlete-card__portrait--photo { object-position: center 24%; transform: scale(1.08); }
+.athlete-card .athlete-card__portrait--photo { object-fit: cover; object-position: center 25%; transform: scale(1.02); transform-origin: center 35%; }
+.athlete-card .athlete-card__photo--uploaded .athlete-card__portrait--photo { object-position: center 22%; transform: scale(1.03); filter: saturate(.94) contrast(1.03); }
 .athlete-card .athlete-card__name { position: absolute; top: 59.5%; left: 15%; right: 15%; height: 7.8%; display: flex; align-items: center; justify-content: center; white-space: nowrap; font-size: 8cqw; line-height: 1; font-weight: 400; letter-spacing: 0; text-align: center; border-top: 1px solid rgb(88 63 22 / .16); border-bottom: 1px solid rgb(88 63 22 / .28); overflow: hidden; text-overflow: ellipsis; z-index: 3; background: linear-gradient(90deg, transparent, rgb(247 230 177 / .54) 22%, rgb(247 230 177 / .54) 78%, transparent); }
 .athlete-card .athlete-card__name--long { font-size: 6.3cqw; }
 .athlete-card--blue .athlete-card__name { border-bottom-color: rgb(244 224 173 / .35); }
-.athlete-card .athlete-card__stats { position: absolute; top: 68.5%; left: 21%; right: 19%; max-height: 20%; overflow: hidden; display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); column-gap: 2cqw; z-index: 3; }
-.athlete-card .athlete-card__stat-column { min-width: 0; display: flex; flex-direction: column; gap: 1.2cqw; }
-.athlete-card .athlete-card__stat-column + .athlete-card__stat-column { padding-left: 2.5cqw; border-left: 1px solid rgb(88 63 22 / .25); }
+.athlete-card .athlete-card__stats { position: absolute; top: 69%; left: 22%; right: 20%; max-height: 19%; overflow: hidden; display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); column-gap: 3.4cqw; z-index: 3; font-family: "Arial Narrow", "Roboto Condensed", Arial, sans-serif; font-stretch: condensed; font-variant-numeric: tabular-nums; }
+.athlete-card .athlete-card__stat-column { min-width: 0; display: flex; flex-direction: column; gap: 1.45cqw; }
+.athlete-card .athlete-card__stat-column + .athlete-card__stat-column { padding-left: 3.2cqw; border-left: 1px solid rgb(88 63 22 / .25); }
 .athlete-card--blue .athlete-card__stat-column + .athlete-card__stat-column { border-left-color: rgb(244 224 173 / .3); }
-.athlete-card .athlete-card__stat { min-width: 0; display: grid; grid-template-columns: 7.4cqw minmax(0,1fr); align-items: baseline; gap: .5cqw; line-height: 1; white-space: nowrap; overflow: hidden; }
-.athlete-card .athlete-card__stat strong { font-weight: 400; font-size: 7.5cqw; }
-.athlete-card .athlete-card__stat span { overflow: hidden; font-size: 5.4cqw; }
+.athlete-card .athlete-card__stat { min-width: 0; display: flex; align-items: baseline; gap: 1.6cqw; line-height: .95; white-space: nowrap; overflow: hidden; }
+.athlete-card .athlete-card__stat strong { flex: 0 0 7.6cqw; font-weight: 800; font-size: 6.7cqw; letter-spacing: -.035em; text-align: right; }
+.athlete-card .athlete-card__stat span { min-width: 0; overflow: hidden; font-size: 4.65cqw; font-weight: 800; letter-spacing: .015em; }
 .athlete-card .athlete-card__award { position: absolute; top: 8.7%; left: 38%; right: 9%; z-index: 5; color: #fff1bd; font-family: Arial,sans-serif; font-size: 3.4cqw; line-height: 1; font-weight: 900; letter-spacing: .12em; text-align: center; text-shadow: 0 1px 4px #07102f; }
 .athlete-card .athlete-card__footer { position: absolute; top: 90.5%; left: 29%; right: 29%; display: flex; align-items: center; gap: 3cqw; opacity: .62; }
 .athlete-card .athlete-card__footer span { height: 1px; background: currentColor; flex: 1; }
