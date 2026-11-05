@@ -1,7 +1,7 @@
-const CACHE = 'fut-parca-shell-v13';
+const CACHE = 'fut-parca-shell-v15';
 const SHELL = [
   './', './index.html', './styles.css', './theme.css', './card.css', './goal.css',
-  './theme-init.js', './app.js', './account_client.mjs', './card.mjs', './domain.mjs', './seed.mjs',
+  './theme-init.js', './app.js', './account_client.mjs', './card.mjs', './photo_cutout.mjs', './domain.mjs', './seed.mjs',
   './manifest.webmanifest', './logo-fut-parca.jpeg', './app-icon-192.png', './app-icon-512.png',
   './app-icon-maskable-512.png', './avatar-1.png', './avatar-2.png', './avatar-3.png', './avatar-4.png', './excluir-conta.html',
 ];
