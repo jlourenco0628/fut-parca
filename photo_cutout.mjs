@@ -62,7 +62,7 @@ const maskCanvas = mask => {
   return canvas;
 };
 
-export function alphaBounds(data, width, height, threshold = 24) {
+export function alphaBounds(data, width, height, threshold = 8) {
   let left = width;
   let top = height;
   let right = -1;
@@ -77,28 +77,54 @@ export function alphaBounds(data, width, height, threshold = 24) {
   return right < left || bottom < top ? null : { left, top, right, bottom };
 }
 
+export function paddedCropGeometry(bounds, canvasWidth, canvasHeight) {
+  const personWidth = bounds.right - bounds.left + 1;
+  const personHeight = bounds.bottom - bounds.top + 1;
+  const padX = Math.max(1, Math.round(personWidth * .09));
+  const padTop = Math.max(1, Math.round(personHeight * .14));
+  const padBottom = Math.max(1, Math.round(personHeight * .025));
+  const requestedLeft = bounds.left - padX;
+  const requestedTop = bounds.top - padTop;
+  const requestedRight = bounds.right + padX;
+  const requestedBottom = bounds.bottom + padBottom;
+  const sourceLeft = Math.max(0, requestedLeft);
+  const sourceTop = Math.max(0, requestedTop);
+  const sourceRight = Math.min(canvasWidth - 1, requestedRight);
+  const sourceBottom = Math.min(canvasHeight - 1, requestedBottom);
+  return {
+    outputWidth: requestedRight - requestedLeft + 1,
+    outputHeight: requestedBottom - requestedTop + 1,
+    sourceLeft,
+    sourceTop,
+    sourceWidth: sourceRight - sourceLeft + 1,
+    sourceHeight: sourceBottom - sourceTop + 1,
+    destinationX: sourceLeft - requestedLeft,
+    destinationY: sourceTop - requestedTop,
+  };
+}
+
 const cropToPerson = canvas => {
   const context = canvas.getContext('2d', { willReadFrequently: true });
   const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
   const bounds = alphaBounds(pixels.data, canvas.width, canvas.height);
   if (!bounds) throw new Error('Não foi possível recortar a pessoa nesta foto.');
-  const personWidth = bounds.right - bounds.left + 1;
-  const personHeight = bounds.bottom - bounds.top + 1;
-  const padX = Math.round(personWidth * .08);
-  const padTop = Math.round(personHeight * .05);
-  const padBottom = Math.round(personHeight * .015);
-  const left = Math.max(0, bounds.left - padX);
-  const top = Math.max(0, bounds.top - padTop);
-  const right = Math.min(canvas.width - 1, bounds.right + padX);
-  const bottom = Math.min(canvas.height - 1, bounds.bottom + padBottom);
-  const width = right - left + 1;
-  const height = bottom - top + 1;
+  const geometry = paddedCropGeometry(bounds, canvas.width, canvas.height);
   const cropped = document.createElement('canvas');
-  cropped.width = width;
-  cropped.height = height;
-  cropped.getContext('2d').drawImage(canvas, left, top, width, height, 0, 0, width, height);
-  canvas.width = width;
-  canvas.height = height;
+  cropped.width = geometry.outputWidth;
+  cropped.height = geometry.outputHeight;
+  cropped.getContext('2d').drawImage(
+    canvas,
+    geometry.sourceLeft,
+    geometry.sourceTop,
+    geometry.sourceWidth,
+    geometry.sourceHeight,
+    geometry.destinationX,
+    geometry.destinationY,
+    geometry.sourceWidth,
+    geometry.sourceHeight,
+  );
+  canvas.width = geometry.outputWidth;
+  canvas.height = geometry.outputHeight;
   canvas.getContext('2d').drawImage(cropped, 0, 0);
   return canvas;
 };
@@ -128,7 +154,7 @@ async function segmentCanvas(canvas) {
 }
 
 export async function removeBackgroundFromCanvas(canvas) {
-  if (hasUsefulTransparency(canvas)) return canvas;
+  if (hasUsefulTransparency(canvas)) return cropToPerson(canvas);
   const job = segmentationQueue.then(() => segmentCanvas(canvas));
   segmentationQueue = job.catch(() => {});
   return job;

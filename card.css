@@ -50,7 +50,7 @@
 .athlete-card .athlete-card__photo--uploaded .athlete-card__portrait--photo { object-position: center 20%; transform: scale(1.035); filter: saturate(.88) contrast(1.13) brightness(.99); mix-blend-mode: multiply; }
 .athlete-card .athlete-card__photo--cutout { -webkit-mask-image: linear-gradient(to bottom, #000 0 76%, transparent 100%); mask-image: linear-gradient(to bottom, #000 0 76%, transparent 100%); }
 .athlete-card .athlete-card__photo--cutout::after { display: none; }
-.athlete-card .athlete-card__photo--cutout .athlete-card__portrait--photo { object-fit: contain; object-position: center bottom; transform: scale(1.13); transform-origin: center bottom; filter: saturate(1.02) contrast(1.05) drop-shadow(0 2px 3px rgb(44 27 12 / .28)); mix-blend-mode: normal; }
+.athlete-card .athlete-card__photo--cutout .athlete-card__portrait--photo { object-fit: contain; object-position: center bottom; transform: scale(1.06); transform-origin: center bottom; filter: saturate(1.02) contrast(1.05) drop-shadow(0 2px 3px rgb(44 27 12 / .28)); mix-blend-mode: normal; }
 .athlete-card .athlete-card__portrait[data-fp-cutout] { transition: opacity 280ms ease, filter 280ms ease; }
 .athlete-card .athlete-card__portrait[data-fp-cutout-state="processing"] { opacity: .12; filter: blur(8px) saturate(.7); }
 .athlete-card .athlete-card__portrait[data-fp-cutout-state="ready"] { opacity: 1; }
