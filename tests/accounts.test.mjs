@@ -143,6 +143,18 @@ test('pelada fixa guarda recorrência e pelada avulsa aceita somente um evento n
   await assert.rejects(store.saveState(singleProfile.token, { state: current.state, expectedRevision: current.revision }), status(409));
 });
 
+test('escudo da pelada chega ao organizador, à busca e aos atletas convidados', async t => {
+  const { store } = await fixture(t, false);
+  const profile = await store.register({ name: 'Dono do Escudo', email: 'escudo@example.com', password: 'senha-escudo-123' });
+  const created = await store.createGroup(profile.token, { name: 'Pelada com Escudo', scheduleType: 'recurring', weeklyDay: 'Sábado', weeklyTime: '18:00', logo: png });
+  assert.equal(created.group.logo, png);
+  assert.equal(created.state.logo, png);
+  const found = await store.searchGroups('pelada com escudo');
+  assert.equal(found[0].logo, png);
+  const member = await store.register({ name: 'Atleta do Escudo', email: 'atleta-escudo@example.com', password: 'senha-atleta-123', inviteCode: created.group.inviteCode });
+  assert.equal(member.session.group.logo, png);
+});
+
 test('logout invalida somente o token utilizado e sessões expiram em sete dias', async t => {
   const { store, path, admin } = await fixture(t, false);
   const other = await store.login({ email: 'organizador@example.com', password: 'senha-ficticia-123' });
