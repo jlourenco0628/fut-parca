@@ -6,4 +6,8 @@ node_modules/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+.chrome-card-preview*/
+.edge-card-preview*/
+.chrome-card-*/
+.edge-card-*/
 
