@@ -18,6 +18,20 @@ const transparentRatio = data => {
   return transparent / Math.max(1, data.length / 4);
 };
 
+const edgeCoverage = (data, width, height, color, tolerance = 58) => {
+  let matches = 0;
+  let samples = 0;
+  const step = Math.max(1, Math.floor(Math.min(width, height) / 128));
+  const sample = (x, y) => {
+    const offset = (y * width + x) * 4;
+    samples++;
+    if (data[offset + 3] > 24 && colorDistance(data, offset, color) <= tolerance) matches++;
+  };
+  for (let x = 0; x < width; x += step) { sample(x, 0); sample(x, height - 1); }
+  for (let y = step; y < height - 1; y += step) { sample(0, y); sample(width - 1, y); }
+  return matches / Math.max(1, samples);
+};
+
 /** Estimate a flat background from the image perimeter without sampling the emblem centre. */
 export function estimateEdgeBackground(data, width, height) {
   if (!data || width < 2 || height < 2 || data.length < width * height * 4) return null;
@@ -117,6 +131,45 @@ export function removeEdgeConnectedBackground(data, width, height, options = {})
   return { removed, background };
 }
 
+/**
+ * Removes common exported-logo mattes, including PNGs that are transparent on
+ * one side but still contain a white canvas with black edge bars on another.
+ * Each neutral colour is flood-filled separately, so enclosed white/black
+ * details in the crest are not reached through a differently coloured matte.
+ */
+export function removeLogoMatte(data, width, height) {
+  const initialTransparency = transparentRatio(data);
+  let removed = 0;
+  let passes = 0;
+
+  const dominant = estimateEdgeBackground(data, width, height);
+  if (dominant) {
+    const result = removeEdgeConnectedBackground(data, width, height, { background: dominant });
+    removed += result.removed;
+    if (result.removed) passes++;
+  }
+
+  // Mixed black/white export canvases do not have one dominant perimeter
+  // colour. Transparent samples remain in the denominator so a real emblem
+  // merely touching an edge is not mistaken for a large rectangular matte.
+  const candidates = [
+    { color: { r: 255, g: 255, b: 255 }, coverage: edgeCoverage(data, width, height, { r: 255, g: 255, b: 255 }) },
+    { color: { r: 0, g: 0, b: 0 }, coverage: edgeCoverage(data, width, height, { r: 0, g: 0, b: 0 }) },
+  ];
+  for (const candidate of candidates) {
+    if (candidate.coverage < .12) continue;
+    const result = removeEdgeConnectedBackground(data, width, height, {
+      background: candidate.color,
+      tolerance: 68,
+      featherTolerance: 116,
+    });
+    removed += result.removed;
+    if (result.removed) passes++;
+  }
+
+  return { removed, passes, initialTransparency };
+}
+
 export function logoAlphaBounds(data, width, height, threshold = 8) {
   let left = width;
   let top = height;
@@ -152,7 +205,7 @@ export function squareLogoGeometry(bounds) {
 export function removeLogoBackgroundFromCanvas(canvas) {
   const context = canvas.getContext('2d', { willReadFrequently: true });
   const image = context.getImageData(0, 0, canvas.width, canvas.height);
-  if (transparentRatio(image.data) < .005) removeEdgeConnectedBackground(image.data, canvas.width, canvas.height);
+  removeLogoMatte(image.data, canvas.width, canvas.height);
   context.putImageData(image, 0, 0);
   const bounds = logoAlphaBounds(image.data, canvas.width, canvas.height);
   if (!bounds) return canvas;
