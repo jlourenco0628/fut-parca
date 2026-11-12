@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { estimateEdgeBackground, removeEdgeConnectedBackground, logoAlphaBounds, squareLogoGeometry } from '../logo_cutout.mjs';
+import { estimateEdgeBackground, removeEdgeConnectedBackground, removeLogoMatte, logoAlphaBounds, squareLogoGeometry } from '../logo_cutout.mjs';
 
 const image = (width, height, [r, g, b, a = 255]) => {
   const data = new Uint8ClampedArray(width * height * 4);
@@ -47,6 +47,24 @@ test('perímetro sem cor dominante não sofre remoção agressiva', () => {
   }
   assert.equal(estimateEdgeBackground(data, width, height), null);
   assert.equal(removeEdgeConnectedBackground(data, width, height).removed, 0);
+});
+
+test('remove tela branca e barras pretas mesmo com metade já transparente', () => {
+  const width = 20, height = 20, data = image(width, height, [0, 0, 0, 0]);
+  for (let y = 0; y < 11; y++) for (let x = 0; x < width; x++) {
+    paint(data, width, x, y, x < 3 || x > 16 ? [2, 2, 2, 255] : [252, 252, 250, 255]);
+  }
+  for (let y = 3; y <= 8; y++) for (let x = 7; x <= 12; x++) paint(data, width, x, y, [230, 92, 24, 255]);
+  paint(data, width, 9, 5, [0, 0, 0, 255]);
+
+  const result = removeLogoMatte(data, width, height);
+
+  assert.ok(result.initialTransparency > .4);
+  assert.ok(result.passes >= 2);
+  assert.equal(alpha(data, width, 0, 0), 0);
+  assert.equal(alpha(data, width, 10, 0), 0);
+  assert.equal(alpha(data, width, 8, 5), 255);
+  assert.equal(alpha(data, width, 9, 5), 255);
 });
 
 test('geometria final cria margem transparente e tela quadrada', () => {
