@@ -4,6 +4,7 @@ import { resolve, dirname, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isIP } from 'node:net';
 import { createAccountStore } from './accounts.mjs';
+import { createPasswordResetDelivery } from './password_reset_delivery.mjs';
 import { MODALITIES, getMatchScore, getRoundStats, getFantasyRanking, getSeasonRanking } from './domain.mjs';
 import { serverConfig } from './server_config.mjs';
 import { generatePdfReport } from './pdf_report.mjs';
@@ -11,7 +12,8 @@ import { generatePdfReport } from './pdf_report.mjs';
 const root = dirname(fileURLToPath(import.meta.url));
 const config = serverConfig();
 const { port, origins } = config;
-const localStore = config.databaseUrl || config.supabase ? null : await createAccountStore({ path: config.dataPath || resolve(root, '../../work/fut-parca.sqlite') });
+const recoveryDelivery = createPasswordResetDelivery();
+const localStore = config.databaseUrl || config.supabase ? null : await createAccountStore({ path: config.dataPath || resolve(root, '../../work/fut-parca.sqlite'), recoveryDelivery });
 const cookieName = 'FPsession';
 const cookieAge = 7 * 24 * 60 * 60;
 const attempts = new Map();
@@ -99,7 +101,7 @@ async function report(req, res, store) {
 async function api(req, res, pathname, url, store) {
   if (!['GET', 'HEAD'].includes(req.method)) mutationOrigin(req);
   if (pathname === '/api/health' && req.method === 'GET') return json(res, 200, { ok:true });
-  if (pathname === '/api/config' && req.method === 'GET') return json(res, 200, { public:Boolean(config.publicOrigin) });
+  if (pathname === '/api/config' && req.method === 'GET') return json(res, 200, { public:Boolean(config.publicOrigin), passwordResetChannels:recoveryDelivery.channels });
   if (pathname === '/api/session' && req.method === 'GET') {
     const session = await store.session(sessionToken(req));
     if (!session) return error(res, 401, 'Entre na sua conta para continuar.', 'unauthorized');
@@ -114,6 +116,16 @@ async function api(req, res, pathname, url, store) {
     rateLimit(req, 'login', 20);
     const result = await store.login(await bodyJSON(req));
     setCookie(res, result.token); return json(res, 200, result.session);
+  }
+  if (pathname === '/api/password-reset/request' && req.method === 'POST') {
+    rateLimit(req, 'password-reset-request', 5);
+    return json(res, 202, await store.requestPasswordReset(await bodyJSON(req)));
+  }
+  if (pathname === '/api/password-reset/confirm' && req.method === 'POST') {
+    rateLimit(req, 'password-reset-confirm', 10);
+    const result = await store.confirmPasswordReset(await bodyJSON(req));
+    setCookie(res, '', 0);
+    return json(res, 200, result);
   }
   if (pathname === '/api/logout' && req.method === 'POST') {
     await store.logout(sessionToken(req)); setCookie(res, '', 0); return json(res, 200, { ok:true });
@@ -144,14 +156,14 @@ export async function handler(req, res) {
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; media-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'");
   try {
-    requestStore = localStore || await createAccountStore({ databaseUrl: config.databaseUrl, supabase: config.supabase });
+    requestStore = localStore || await createAccountStore({ databaseUrl: config.databaseUrl, supabase: config.supabase, recoveryDelivery });
     const url = new URL(req.url, `http://127.0.0.1:${port}`);
     if (url.pathname.startsWith('/api/')) return await api(req, res, url.pathname, url, requestStore);
     if (req.method !== 'GET' && req.method !== 'HEAD') return error(res, 405, 'Método não permitido.');
     const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'index.html';
     const path = resolve(root, rel);
     const extension = extname(path).toLowerCase();
-    if (!path.startsWith(root + sep) || !types[extension] || /(?:^|[\\/])(?:\.[^\\/]*|node_modules|tests|accounts\.mjs|server(?:_config)?\.mjs)(?:[\\/]|$)/i.test(rel)) return error(res, 404, 'Arquivo não encontrado.');
+    if (!path.startsWith(root + sep) || !types[extension] || /(?:^|[\\/])(?:\.[^\\/]*|node_modules|tests|accounts\.mjs|password_reset_delivery\.mjs|server(?:_config)?\.mjs)(?:[\\/]|$)/i.test(rel)) return error(res, 404, 'Arquivo não encontrado.');
     const canonical = await realpath(path);
     if (!canonical.startsWith(root + sep)) return error(res, 404, 'Arquivo não encontrado.');
     const content = await readFile(canonical);

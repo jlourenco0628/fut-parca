@@ -13,6 +13,8 @@ export function createAccountClient({onSession,onSignedOut,onError}) {
     async ready(){try{publish(await request('/api/session'));}catch(err){if(err.code!==401)onError('O modo de contas está indisponível. A demonstração continua funcionando.');}},
     async login(data){const captured=++generation;const next=await request('/api/login','POST',data);if(captured===generation)publish(next);},
     async register(data){const captured=++generation;const next=await request('/api/register','POST',data);if(captured===generation)publish(next);},
+    requestPasswordReset(data){return request('/api/password-reset/request','POST',data);},
+    resetPassword(data){return request('/api/password-reset/confirm','POST',data);},
     searchGroups(query=''){return request(`/api/peladas?q=${encodeURIComponent(query)}`);},
     async createGroup(data){const next=await request('/api/peladas','POST',data);publish(next);return next;},
     async joinByInvite(inviteCode){const next=await request('/api/pelada-convite','POST',{inviteCode});publish(next);return next;},

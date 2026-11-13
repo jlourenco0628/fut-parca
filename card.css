@@ -176,10 +176,10 @@
 
 .athlete-card .athlete-card__crest {
   position: absolute;
-  top: 46.5%;
-  left: 14.1%;
-  width: 15.5cqw;
-  height: 15.5cqw;
+  top: 45.25%;
+  left: 12.85%;
+  width: 18cqw;
+  height: 18cqw;
   z-index: 8;
   display: grid;
   place-items: center;
@@ -251,9 +251,9 @@
 }
 .athlete-card .athlete-card__stats::after { content: ''; position: absolute; left: 50%; top: 5%; bottom: 6%; width: .42cqw; border-radius: 1cqw; background: linear-gradient(to bottom, transparent, currentColor 15% 85%, transparent); opacity: .16; box-shadow: .3cqw 0 .35cqw rgb(255 255 255 / .18); transform: translateX(-50%) translateZ(-4px); }
 .athlete-card .athlete-card__stat-column { min-width: 0; display: grid; grid-template-rows: repeat(3, minmax(0, 1fr)); align-items: center; gap: .55cqw; }
-.athlete-card .athlete-card__stat { min-width: 0; display: grid; grid-template-columns: 2ch minmax(0, 1fr); align-items: baseline; column-gap: 1.35cqw; white-space: nowrap; overflow: hidden; line-height: .86; }
-.athlete-card .athlete-card__stat strong { display: block; min-width: 0; font-size: 7.25cqw; font-weight: 900; letter-spacing: -.025em; text-align: right; text-shadow: -.12cqw -.1cqw 0 var(--fp-text-highlight), .16cqw .23cqw 0 var(--fp-text-shadow), 0 .55cqw .8cqw rgb(0 0 0 / .18); }
-.athlete-card .athlete-card__stat span { display: block; min-width: 0; overflow: hidden; font-size: 4.75cqw; font-weight: 700; letter-spacing: .035em; text-shadow: 0 .25cqw .45cqw rgb(0 0 0 / .2); }
+.athlete-card .athlete-card__stat { min-width: 0; display: flex; align-items: baseline; gap: 1.9cqw; white-space: nowrap; overflow: hidden; line-height: .86; }
+.athlete-card .athlete-card__stat strong { display: block; flex: 0 0 auto; min-width: 0; font-size: 7.25cqw; font-weight: 900; letter-spacing: -.025em; text-align: right; text-shadow: -.12cqw -.1cqw 0 var(--fp-text-highlight), .16cqw .23cqw 0 var(--fp-text-shadow), 0 .55cqw .8cqw rgb(0 0 0 / .18); }
+.athlete-card .athlete-card__stat span { display: block; flex: 0 1 auto; min-width: 0; overflow: hidden; font-size: 4.75cqw; font-weight: 700; letter-spacing: .035em; text-shadow: 0 .25cqw .45cqw rgb(0 0 0 / .2); }
 
 .athlete-card .athlete-card__award { position: absolute; top: 8%; left: 37%; right: 8%; z-index: 9; color: #fff1bd; font-family: "FP Barlow Condensed", sans-serif; font-size: 3.65cqw; line-height: 1; font-weight: 900; letter-spacing: .11em; text-align: center; text-shadow: 0 .3cqw 0 #091139, 0 .9cqw 1.4cqw #04081f; transform: translateZ(70px); }
 

@@ -12,7 +12,7 @@ Alternativamente, com Node.js disponível: `npm start`. Não é necessário inst
 
 ## Funções desta versão
 
-- Contas com entrada por e-mail e senha, criação de turmas e código de convite. O organizador gerencia a pelada; cada membro edita seu próprio perfil e suas escalações abertas. A exclusão da conta exige a senha, remove as sessões e os dados pessoais e preserva históricos somente com um atleta anonimizado.
+- Contas com entrada por e-mail e senha, criação de turmas e código de convite. A recuperação de senha aceita código de 6 dígitos por e-mail ou SMS quando o respectivo provedor está configurado. O organizador gerencia a pelada; cada membro edita seu próprio perfil e suas escalações abertas. A exclusão da conta exige a senha, remove as sessões e os dados pessoais e preserva históricos somente com um atleta anonimizado.
 - Cards bronze, prata, ouro e especial com moldura, atleta, nota, posição, bandeira, nome, escudo e seis atributos em camadas 3D independentes. A tipografia Barlow Condensed é embutida no app para manter números tabulares e alinhamento consistente em celular e desktop. O giro de entrada, a inclinação e o brilho respondem ao mouse ou toque e respeitam a preferência de movimento reduzido.
 - O card usa o escudo da pelada à qual o atleta pertence. Um recorte local próprio para emblemas remove fundos uniformes conectados às bordas, preserva detalhes internos e cria margem transparente; a marca Fut Parça aparece somente quando a pelada não possui escudo. A alternância entre tema claro e escuro fica salva neste navegador.
 - Instalação como PWA em navegadores compatíveis, com ícones próprios para Android e iPhone e cache da interface. O servidor continua necessário para contas, sincronização e PDFs; o cache não substitui a conexão durante uma pelada.
@@ -62,7 +62,15 @@ A demonstração fica no `localStorage` deste navegador. Os dados das contas e t
 
 As turmas ficam separadas e os dados são atualizados periodicamente entre sessões conectadas ao mesmo servidor. Alterações concorrentes são detectadas para evitar sobrescrever o trabalho de outro parça. O PDF de uma conta usa o fechamento salvo no servidor.
 
-Por padrão, o servidor escuta apenas neste computador. A configuração de hospedagem está preparada em `Dockerfile` e `render.yaml`; veja [PUBLICACAO.md](PUBLICACAO.md) para colocar o app online e entender a etapa seguinte das lojas. Nenhum e-mail ou mensagem é enviado. Recuperação de senha por e-mail e notificações ainda não fazem parte desta versão. A câmera exige autorização do navegador e um contexto permitido; se indisponível, a foto pode ser enviada.
+Por padrão, o servidor escuta apenas neste computador. A configuração de hospedagem está preparada em `Dockerfile` e `render.yaml`; veja [PUBLICACAO.md](PUBLICACAO.md) para colocar o app online e entender a etapa seguinte das lojas. A câmera exige autorização do navegador e um contexto permitido; se indisponível, a foto pode ser enviada.
+
+## Recuperação de senha
+
+Os códigos expiram em 10 minutos, funcionam uma única vez, são bloqueados depois de cinco tentativas e ficam armazenados somente como hash. Ao trocar a senha, todas as sessões anteriores da conta são encerradas. A API usa respostas genéricas para não informar se uma conta existe e limita solicitações por endereço IP.
+
+Para ativar e-mail, crie uma conta no [Resend](https://resend.com/) e configure `RESEND_API_KEY` e `FUT_PARCA_EMAIL_FROM`. Para ativar SMS, crie uma conta no [Twilio](https://www.twilio.com/) e configure `TWILIO_ACCOUNT_SID`, `TWILIO_API_KEY`, `TWILIO_API_SECRET` e `TWILIO_MESSAGING_SERVICE_SID` (ou `TWILIO_FROM_NUMBER`). Os nomes também estão em `.env.example`. Chaves reais pertencem apenas às variáveis protegidas da hospedagem e nunca devem ser salvas no GitHub.
+
+Sem essas variáveis, o app continua funcionando normalmente e informa que o canal de recuperação ainda não foi ativado.
 
 ## Estrutura
 

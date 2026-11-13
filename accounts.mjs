@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual, createHash } from 'node:crypto';
+import { randomBytes, randomInt, randomUUID, scrypt as scryptCallback, timingSafeEqual, createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -7,6 +7,9 @@ import { MODALITIES, EVENT_RULES, beginRound, closeRound, saveFantasy } from './
 
 const scrypt = promisify(scryptCallback);
 const SESSION_LIFETIME = 7 * 24 * 60 * 60 * 1000;
+const PASSWORD_RESET_LIFETIME = 10 * 60 * 1000;
+const PASSWORD_RESET_MAX_ATTEMPTS = 5;
+const PASSWORD_RESET_RESEND_DELAY = 60 * 1000;
 const ATTRIBUTE_KEYS = ['rit', 'fin', 'pas', 'con', 'def', 'fis', 'div', 'han', 'kic', 'ref', 'spd', 'pos'];
 const PERSONAL_FIELDS = new Set(['name', 'nickname', 'contact', 'photo', 'avatar', 'sex', 'birthDate', 'preferences']);
 const EVENT_TYPES = new Map(EVENT_RULES.map(rule => [rule.type, rule]));
@@ -51,6 +54,15 @@ function passwordOf(value) {
   return value;
 }
 
+function normalizedPhone(value) {
+  const raw = String(value || '').trim();
+  const digits = raw.replace(/\D/gu, '');
+  if (digits.length === 10 || digits.length === 11) return `+55${digits}`;
+  if ((digits.length === 12 || digits.length === 13) && digits.startsWith('55')) return `+${digits}`;
+  if (raw.startsWith('+') && digits.length >= 10 && digits.length <= 15) return `+${digits}`;
+  return '';
+}
+
 function uniqueId(seen, value, label) {
   identifier(value, label);
   if (seen.has(value)) error(`${label} repetido.`);
@@ -92,11 +104,12 @@ function publicSession(user, group) {
 function normalizeRepositoryData(value) {
   const data = value && typeof value === 'object' ? value : {};
   return {
-    version: 2,
+    version: 3,
     users: Array.isArray(data.users) ? data.users : [],
     groups: Array.isArray(data.groups) ? data.groups : [],
     sessions: Array.isArray(data.sessions) ? data.sessions : [],
     joinRequests: Array.isArray(data.joinRequests) ? data.joinRequests : [],
+    passwordResets: Array.isArray(data.passwordResets) ? data.passwordResets : [],
   };
 }
 
@@ -150,6 +163,7 @@ async function openSupabaseRepository({ url, key, secret }) {
     insertUser: user => data.users.push(copy(user)),
     updateUserRole(id, role) { const user = data.users.find(item => item.id === id); if (user) user.role = role; },
     updateUserMembership(id, groupId, role) { const user = data.users.find(item => item.id === id); if (user) { user.groupId = groupId; user.role = role; } },
+    updateUserPassword(id, salt, hash) { const user = data.users.find(item => item.id === id); if (user) { user.salt = salt; user.hash = hash; } },
     requestByUserGroup: (userId, groupId) => read(() => data.joinRequests.find(item => item.userId === userId && item.groupId === groupId)),
     requestsForGroup: groupId => read(() => data.joinRequests.filter(item => item.groupId === groupId)),
     requestById: id => read(() => data.joinRequests.find(item => item.id === id)),
@@ -160,6 +174,15 @@ async function openSupabaseRepository({ url, key, secret }) {
     insertSession(hash, userId, expiresAt) { data.sessions = data.sessions.filter(session => session.expiresAt > Date.now()); data.sessions.push({ hash, userId, expiresAt }); },
     deleteSession(hash) { data.sessions = data.sessions.filter(session => session.hash !== hash); },
     deleteSessionsForUser(userId) { data.sessions = data.sessions.filter(session => session.userId !== userId); },
+    passwordResetById: id => read(() => data.passwordResets.find(reset => reset.id === id)),
+    latestPasswordResetForUser: (userId, channel) => read(() => data.passwordResets.filter(reset => reset.userId === userId && reset.channel === channel).sort((a, b) => b.createdAt - a.createdAt)[0]),
+    insertPasswordReset(reset) { data.passwordResets = data.passwordResets.filter(item => item.userId !== reset.userId || item.channel !== reset.channel); data.passwordResets.push(copy(reset)); },
+    insertPasswordResetAlias(reset) { data.passwordResets = data.passwordResets.filter(item => item.id !== reset.id); data.passwordResets.push(copy(reset)); },
+    incrementPasswordResetChallengeAttempts(userId, channel, codeHash) { for (const reset of data.passwordResets) if (reset.userId === userId && reset.channel === channel && reset.codeHash === codeHash) reset.attempts++; },
+    deletePasswordReset(id) { data.passwordResets = data.passwordResets.filter(reset => reset.id !== id); },
+    deletePasswordResetChallenge(userId, channel, codeHash) { data.passwordResets = data.passwordResets.filter(reset => reset.userId !== userId || reset.channel !== channel || reset.codeHash !== codeHash); },
+    deletePasswordResetsForUser(userId) { data.passwordResets = data.passwordResets.filter(reset => reset.userId !== userId); },
+    deleteExpiredPasswordResets(now) { data.passwordResets = data.passwordResets.filter(reset => reset.expiresAt > now && reset.attempts < PASSWORD_RESET_MAX_ATTEMPTS); },
     storageStatus() { return { backend: 'supabase', table: 'private.fut_parca_store', compareAndSwap: true }; },
     close() {},
   };
@@ -205,6 +228,7 @@ async function openPostgresRepository(databaseUrl) {
     insertUser: user => data.users.push(copy(user)),
     updateUserRole(id, role) { const user = data.users.find(item => item.id === id); if (user) user.role = role; },
     updateUserMembership(id, groupId, role) { const user = data.users.find(item => item.id === id); if (user) { user.groupId = groupId; user.role = role; } },
+    updateUserPassword(id, salt, hash) { const user = data.users.find(item => item.id === id); if (user) { user.salt = salt; user.hash = hash; } },
     requestByUserGroup: (userId, groupId) => read(() => data.joinRequests.find(item => item.userId === userId && item.groupId === groupId)),
     requestsForGroup: groupId => read(() => data.joinRequests.filter(item => item.groupId === groupId)),
     requestById: id => read(() => data.joinRequests.find(item => item.id === id)),
@@ -215,6 +239,15 @@ async function openPostgresRepository(databaseUrl) {
     insertSession(hash, userId, expiresAt) { data.sessions = data.sessions.filter(session => session.expiresAt > Date.now()); data.sessions.push({ hash, userId, expiresAt }); },
     deleteSession(hash) { data.sessions = data.sessions.filter(session => session.hash !== hash); },
     deleteSessionsForUser(userId) { data.sessions = data.sessions.filter(session => session.userId !== userId); },
+    passwordResetById: id => read(() => data.passwordResets.find(reset => reset.id === id)),
+    latestPasswordResetForUser: (userId, channel) => read(() => data.passwordResets.filter(reset => reset.userId === userId && reset.channel === channel).sort((a, b) => b.createdAt - a.createdAt)[0]),
+    insertPasswordReset(reset) { data.passwordResets = data.passwordResets.filter(item => item.userId !== reset.userId || item.channel !== reset.channel); data.passwordResets.push(copy(reset)); },
+    insertPasswordResetAlias(reset) { data.passwordResets = data.passwordResets.filter(item => item.id !== reset.id); data.passwordResets.push(copy(reset)); },
+    incrementPasswordResetChallengeAttempts(userId, channel, codeHash) { for (const reset of data.passwordResets) if (reset.userId === userId && reset.channel === channel && reset.codeHash === codeHash) reset.attempts++; },
+    deletePasswordReset(id) { data.passwordResets = data.passwordResets.filter(reset => reset.id !== id); },
+    deletePasswordResetChallenge(userId, channel, codeHash) { data.passwordResets = data.passwordResets.filter(reset => reset.userId !== userId || reset.channel !== channel || reset.codeHash !== codeHash); },
+    deletePasswordResetsForUser(userId) { data.passwordResets = data.passwordResets.filter(reset => reset.userId !== userId); },
+    deleteExpiredPasswordResets(now) { data.passwordResets = data.passwordResets.filter(reset => reset.expiresAt > now && reset.attempts < PASSWORD_RESET_MAX_ATTEMPTS); },
     storageStatus() { return { backend: 'postgres', table: 'private.fut_parca_store', transactionLocking: true }; },
     close() {},
   };
@@ -235,7 +268,9 @@ async function openRepository(path, databaseUrl, supabase) {
       CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, group_id TEXT NOT NULL REFERENCES groups(id), role TEXT NOT NULL, athlete_id TEXT NOT NULL, password_salt TEXT NOT NULL, password_hash TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS join_requests (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), group_id TEXT NOT NULL REFERENCES groups(id), status TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(user_id, group_id));
-      CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);`);
+      CREATE TABLE IF NOT EXISTS password_resets (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, channel TEXT NOT NULL, salt TEXT NOT NULL, code_hash TEXT NOT NULL, expires_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);
+      CREATE INDEX IF NOT EXISTS password_resets_user ON password_resets(user_id,channel,created_at);`);
     const groupRow = row => row ? { id: row.id, name: row.name, inviteCode: row.invite_code, revision: row.revision, state: JSON.parse(row.state_json) } : undefined;
     const userRow = row => row ? { id: row.id, name: row.name, email: row.email, groupId: row.group_id, role: row.role, athleteId: row.athlete_id, salt: row.password_salt, hash: row.password_hash } : undefined;
     return {
@@ -253,6 +288,7 @@ async function openRepository(path, databaseUrl, supabase) {
       insertUser(user) { db.prepare('INSERT INTO users VALUES (?,?,?,?,?,?,?,?)').run(user.id, user.name, user.email, user.groupId, user.role, user.athleteId, user.salt, user.hash); },
       updateUserRole(id, role) { db.prepare('UPDATE users SET role=? WHERE id=?').run(role, id); },
       updateUserMembership(id, groupId, role) { db.prepare('UPDATE users SET group_id=?,role=? WHERE id=?').run(groupId, role, id); },
+      updateUserPassword(id, salt, hash) { db.prepare('UPDATE users SET password_salt=?,password_hash=? WHERE id=?').run(salt, hash, id); },
       requestByUserGroup(userId, groupId) { return db.prepare('SELECT * FROM join_requests WHERE user_id=? AND group_id=?').get(userId, groupId); },
       requestsForGroup(groupId) { return db.prepare('SELECT * FROM join_requests WHERE group_id=? ORDER BY created_at').all(groupId); },
       requestById(id) { return db.prepare('SELECT * FROM join_requests WHERE id=?').get(id); },
@@ -263,6 +299,15 @@ async function openRepository(path, databaseUrl, supabase) {
       insertSession(hash, userId, expiresAt) { db.prepare('DELETE FROM sessions WHERE expires_at<=?').run(Date.now()); db.prepare('INSERT INTO sessions VALUES (?,?,?)').run(hash, userId, expiresAt); },
       deleteSession(hash) { db.prepare('DELETE FROM sessions WHERE token_hash=?').run(hash); },
       deleteSessionsForUser(userId) { db.prepare('DELETE FROM sessions WHERE user_id=?').run(userId); },
+      passwordResetById(id) { const row = db.prepare('SELECT * FROM password_resets WHERE id=?').get(id); return row ? { id:row.id, userId:row.user_id, channel:row.channel, salt:row.salt, codeHash:row.code_hash, expiresAt:row.expires_at, attempts:row.attempts, createdAt:row.created_at } : undefined; },
+      latestPasswordResetForUser(userId, channel) { const row = db.prepare('SELECT * FROM password_resets WHERE user_id=? AND channel=? ORDER BY created_at DESC LIMIT 1').get(userId, channel); return row ? { id:row.id, userId:row.user_id, channel:row.channel, salt:row.salt, codeHash:row.code_hash, expiresAt:row.expires_at, attempts:row.attempts, createdAt:row.created_at } : undefined; },
+      insertPasswordReset(reset) { db.prepare('DELETE FROM password_resets WHERE user_id=? AND channel=?').run(reset.userId, reset.channel); db.prepare('INSERT INTO password_resets VALUES (?,?,?,?,?,?,?,?)').run(reset.id, reset.userId, reset.channel, reset.salt, reset.codeHash, reset.expiresAt, reset.attempts, reset.createdAt); },
+      insertPasswordResetAlias(reset) { db.prepare('INSERT INTO password_resets VALUES (?,?,?,?,?,?,?,?)').run(reset.id, reset.userId, reset.channel, reset.salt, reset.codeHash, reset.expiresAt, reset.attempts, reset.createdAt); },
+      incrementPasswordResetChallengeAttempts(userId, channel, codeHash) { db.prepare('UPDATE password_resets SET attempts=attempts+1 WHERE user_id=? AND channel=? AND code_hash=?').run(userId, channel, codeHash); },
+      deletePasswordReset(id) { db.prepare('DELETE FROM password_resets WHERE id=?').run(id); },
+      deletePasswordResetChallenge(userId, channel, codeHash) { db.prepare('DELETE FROM password_resets WHERE user_id=? AND channel=? AND code_hash=?').run(userId, channel, codeHash); },
+      deletePasswordResetsForUser(userId) { db.prepare('DELETE FROM password_resets WHERE user_id=?').run(userId); },
+      deleteExpiredPasswordResets(now) { db.prepare('DELETE FROM password_resets WHERE expires_at<=? OR attempts>=?').run(now, PASSWORD_RESET_MAX_ATTEMPTS); },
       storageStatus() {
         return {
           backend: 'sqlite',
@@ -275,8 +320,9 @@ async function openRepository(path, databaseUrl, supabase) {
     };
   }
   const jsonPath = `${path}.json`;
-  let data = existsSync(jsonPath) ? JSON.parse(readFileSync(jsonPath, 'utf8')) : { version: 2, users: [], groups: [], sessions: [], joinRequests: [] };
+  let data = existsSync(jsonPath) ? JSON.parse(readFileSync(jsonPath, 'utf8')) : { version: 3, users: [], groups: [], sessions: [], joinRequests: [], passwordResets: [] };
   data.joinRequests ||= [];
+  data.passwordResets ||= [];
   let inTransaction = false;
   const persist = () => { const temporary = `${jsonPath}.${randomUUID()}.tmp`; writeFileSync(temporary, JSON.stringify(data), { encoding: 'utf8', mode: 0o600 }); renameSync(temporary, jsonPath); };
   const read = fn => { if (!inTransaction) data = JSON.parse(readFileSync(jsonPath, 'utf8')); return fn(); };
@@ -299,6 +345,7 @@ async function openRepository(path, databaseUrl, supabase) {
     insertUser: user => data.users.push(copy(user)),
     updateUserRole(id, role) { const user = data.users.find(item => item.id === id); if (user) user.role = role; },
     updateUserMembership(id, groupId, role) { const user = data.users.find(item => item.id === id); if (user) { user.groupId = groupId; user.role = role; } },
+    updateUserPassword(id, salt, hash) { const user = data.users.find(item => item.id === id); if (user) { user.salt = salt; user.hash = hash; } },
     requestByUserGroup: (userId, groupId) => read(() => data.joinRequests.find(item => item.userId === userId && item.groupId === groupId)),
     requestsForGroup: groupId => read(() => data.joinRequests.filter(item => item.groupId === groupId)),
     requestById: id => read(() => data.joinRequests.find(item => item.id === id)),
@@ -309,6 +356,15 @@ async function openRepository(path, databaseUrl, supabase) {
     insertSession(hash, userId, expiresAt) { data.sessions = data.sessions.filter(session => session.expiresAt > Date.now()); data.sessions.push({ hash, userId, expiresAt }); },
     deleteSession(hash) { data.sessions = data.sessions.filter(session => session.hash !== hash); },
     deleteSessionsForUser(userId) { data.sessions = data.sessions.filter(session => session.userId !== userId); },
+    passwordResetById: id => read(() => data.passwordResets.find(reset => reset.id === id)),
+    latestPasswordResetForUser: (userId, channel) => read(() => data.passwordResets.filter(reset => reset.userId === userId && reset.channel === channel).sort((a, b) => b.createdAt - a.createdAt)[0]),
+    insertPasswordReset(reset) { data.passwordResets = data.passwordResets.filter(item => item.userId !== reset.userId || item.channel !== reset.channel); data.passwordResets.push(copy(reset)); },
+    insertPasswordResetAlias(reset) { data.passwordResets = data.passwordResets.filter(item => item.id !== reset.id); data.passwordResets.push(copy(reset)); },
+    incrementPasswordResetChallengeAttempts(userId, channel, codeHash) { for (const reset of data.passwordResets) if (reset.userId === userId && reset.channel === channel && reset.codeHash === codeHash) reset.attempts++; },
+    deletePasswordReset(id) { data.passwordResets = data.passwordResets.filter(reset => reset.id !== id); },
+    deletePasswordResetChallenge(userId, channel, codeHash) { data.passwordResets = data.passwordResets.filter(reset => reset.userId !== userId || reset.channel !== channel || reset.codeHash !== codeHash); },
+    deletePasswordResetsForUser(userId) { data.passwordResets = data.passwordResets.filter(reset => reset.userId !== userId); },
+    deleteExpiredPasswordResets(now) { data.passwordResets = data.passwordResets.filter(reset => reset.expiresAt > now && reset.attempts < PASSWORD_RESET_MAX_ATTEMPTS); },
     storageStatus() { return { backend: 'json', atomicWrites: true }; },
     close() {},
   };
@@ -498,9 +554,10 @@ function withoutAccountData(state, user) {
   };
 }
 
-export async function createAccountStore({ path, databaseUrl, supabase } = {}) {
+export async function createAccountStore({ path, databaseUrl, supabase, recoveryDelivery } = {}) {
   if (!databaseUrl && !supabase && (typeof path !== 'string' || !path)) error('Informe o banco de contas.');
   const repository = await openRepository(path, databaseUrl, supabase);
+  const recoveryChannels = new Set(Array.isArray(recoveryDelivery?.channels) ? recoveryDelivery.channels.filter(channel => channel === 'email' || channel === 'sms') : []);
   let closed = false;
   const lookup = token => {
     if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) return null;
@@ -513,8 +570,15 @@ export async function createAccountStore({ path, databaseUrl, supabase } = {}) {
   };
   const requireSession = token => lookup(token) || error('Entre na sua conta para continuar.', 401);
   const issueSession = user => { const token = randomBytes(32).toString('hex'); repository.insertSession(hashToken(token), user.id, Date.now() + SESSION_LIFETIME); return token; };
+  const phoneForUser = user => {
+    const group = repository.groupById(user.groupId);
+    const athlete = group?.state?.athletes?.find(item => item.id === user.athleteId);
+    return normalizedPhone(athlete?.contact);
+  };
+  const resetFailure = () => error('Código inválido ou expirado. Solicite um novo código.', 400);
   return {
     backend: repository.kind,
+    passwordResetChannels: [...recoveryChannels],
     async storageStatus() { return repository.storageStatus(); },
     async register(input = {}) {
       const name = text(input.name, 'Nome', 80, 2), email = emailOf(input.email), password = passwordOf(input.password);
@@ -551,6 +615,75 @@ export async function createAccountStore({ path, databaseUrl, supabase } = {}) {
       if (!user || candidate.length !== expected.length || !timingSafeEqual(candidate, expected)) error('E-mail ou senha incorretos.', 401);
       return repository.transaction(() => { const current = repository.userById(user.id); return { token: issueSession(current), session: publicSession(current, repository.groupById(current.groupId)) }; });
     },
+    async requestPasswordReset(input = {}) {
+      const channel = input.channel === 'sms' ? 'sms' : input.channel === 'email' ? 'email' : error('Escolha recuperação por e-mail ou SMS.');
+      if (!recoveryChannels.has(channel) || typeof recoveryDelivery?.send !== 'function') error(`A recuperação por ${channel === 'sms' ? 'SMS' : 'e-mail'} ainda não está disponível.`, 503);
+      const minimumResponse = new Promise(resolve => setTimeout(resolve, Math.max(0, Number(recoveryDelivery.minimumResponseMs) || 0)));
+      const identifierEmail = emailOf(input.identifier);
+      const now = Date.now();
+      await repository.transaction(() => repository.deleteExpiredPasswordResets(now));
+      const user = repository.userByEmail(identifierEmail);
+      const requestId = randomBytes(32).toString('hex');
+      const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+      const codeSalt = randomBytes(16).toString('hex');
+      const codeHash = (await scrypt(code, codeSalt, 32)).toString('hex');
+      const response = { ok:true, requestId, expiresInSeconds:PASSWORD_RESET_LIFETIME / 1000 };
+      const destination = user ? (channel === 'email' ? user.email : phoneForUser(user)) : '';
+      if (!user || !destination) { await minimumResponse; return response; }
+      const reset = { id:requestId, userId:user.id, channel, salt:codeSalt, codeHash, expiresAt:now + PASSWORD_RESET_LIFETIME, attempts:0, createdAt:now };
+      const shouldSend = await repository.transaction(() => {
+        const currentUser = repository.userById(user.id);
+        if (!currentUser) return false;
+        const recent = repository.latestPasswordResetForUser(user.id, channel);
+        if (recent && recent.expiresAt > now && recent.createdAt > now - PASSWORD_RESET_RESEND_DELAY) {
+          repository.insertPasswordResetAlias({ ...recent, id:requestId });
+          return false;
+        }
+        repository.insertPasswordReset(reset);
+        return true;
+      });
+      if (!shouldSend) { await minimumResponse; return response; }
+      try {
+        await recoveryDelivery.send({ channel, destination, code, expiresMinutes:PASSWORD_RESET_LIFETIME / 60000, name:user.name });
+      } catch (cause) {
+        await repository.transaction(() => repository.deletePasswordReset(requestId));
+        recoveryDelivery.reportError?.(cause);
+      }
+      await minimumResponse;
+      return response;
+    },
+    async confirmPasswordReset(input = {}) {
+      const requestId = typeof input.requestId === 'string' && /^[a-f0-9]{64}$/.test(input.requestId) ? input.requestId : '';
+      const code = typeof input.code === 'string' && /^\d{6}$/.test(input.code) ? input.code : '000000';
+      const password = passwordOf(input.password);
+      const reset = requestId ? repository.passwordResetById(requestId) : null;
+      const codeSalt = reset?.salt || randomBytes(16).toString('hex');
+      const candidate = await scrypt(code, codeSalt, 32);
+      const expected = reset && /^[a-f0-9]{64}$/.test(reset.codeHash) ? Buffer.from(reset.codeHash, 'hex') : Buffer.alloc(32);
+      const now = Date.now();
+      const valid = Boolean(reset && reset.expiresAt > now && reset.attempts < PASSWORD_RESET_MAX_ATTEMPTS && candidate.length === expected.length && timingSafeEqual(candidate, expected));
+      if (!valid) {
+        if (reset) await repository.transaction(() => {
+          const current = repository.passwordResetById(requestId);
+          if (!current) return;
+          if (current.expiresAt <= now || current.attempts + 1 >= PASSWORD_RESET_MAX_ATTEMPTS) repository.deletePasswordResetChallenge(current.userId, current.channel, current.codeHash);
+          else repository.incrementPasswordResetChallengeAttempts(current.userId, current.channel, current.codeHash);
+        });
+        resetFailure();
+      }
+      const passwordSalt = randomBytes(16).toString('hex');
+      const passwordHash = (await scrypt(password, passwordSalt, 64)).toString('hex');
+      return repository.transaction(() => {
+        const current = repository.passwordResetById(requestId);
+        if (!current || current.userId !== reset.userId || current.codeHash !== reset.codeHash || current.expiresAt <= Date.now() || current.attempts >= PASSWORD_RESET_MAX_ATTEMPTS) resetFailure();
+        const user = repository.userById(current.userId);
+        if (!user) resetFailure();
+        repository.updateUserPassword(user.id, passwordSalt, passwordHash);
+        repository.deleteSessionsForUser(user.id);
+        repository.deletePasswordResetsForUser(user.id);
+        return { ok:true };
+      });
+    },
     async session(token) { const current = lookup(token); return current ? publicSession(current.user, current.group) : null; },
     async logout(token) { if (typeof token === 'string' && /^[a-f0-9]{64}$/.test(token)) await repository.transaction(() => repository.deleteSession(hashToken(token))); return { ok: true }; },
     async deleteAccount(token, input = {}) {
@@ -564,6 +697,7 @@ export async function createAccountStore({ path, databaseUrl, supabase } = {}) {
         if (user.id !== current.user.id) error('Entre novamente para excluir sua conta.', 401);
         const members = repository.usersForGroup(group.id);
         repository.deleteSessionsForUser(user.id);
+        repository.deletePasswordResetsForUser(user.id);
         repository.deleteUser(user.id);
         if (members.length === 1) {
           repository.deleteGroup(group.id);
