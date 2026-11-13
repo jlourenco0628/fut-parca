@@ -23,6 +23,24 @@ async function fixture(t, withMember = true) {
   return { store, path, admin, member };
 }
 
+async function recoveryFixture(t) {
+  await mkdir(scratch, { recursive:true });
+  const directory = await mkdtemp(join(scratch, 'password-reset-test-'));
+  const path = join(directory, 'accounts.sqlite');
+  const deliveries = [];
+  const recoveryDelivery = {
+    channels:['email','sms'],
+    async send(message) { deliveries.push(structuredClone(message)); },
+  };
+  const store = await createAccountStore({ path, recoveryDelivery });
+  t.after(() => store.close());
+  const account = await store.register({
+    name:'Atleta Recuperação', email:'recuperacao@example.com', password:'senha-antiga-123', groupName:'Pelada Recuperação',
+    contact:'(85) 99999-0000',
+  });
+  return { store, path, account, deliveries };
+}
+
 async function configure(store, admin) {
   const current = await store.getState(admin.token), seed = createSeed();
   const state = { ...current.state, athletes: [...current.state.athletes, ...seed.athletes], rounds: seed.rounds };
@@ -336,5 +354,90 @@ test('salvar em uma turma não altera outra turma nem autoriza acesso com sessã
   assert.equal((await store.getState(second.token)).state.athletes.length, 1);
   assert.notEqual(second.session.group.id, admin.session.group.id);
   await assert.rejects(store.saveState('invalido', { state: current.state, expectedRevision: 1 }), status(401));
+});
+
+test('recuperação armazena somente hash, troca a senha e invalida todas as sessões', async t => {
+  const { store, path, account, deliveries } = await recoveryFixture(t);
+  const secondSession = await store.login({ email:'recuperacao@example.com', password:'senha-antiga-123' });
+  const requested = await store.requestPasswordReset({ identifier:'RECUPERACAO@example.com', channel:'email' });
+  assert.equal(requested.requestId.length, 64);
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0].destination, 'recuperacao@example.com');
+  assert.match(deliveries[0].code, /^\d{6}$/u);
+
+  if (store.backend === 'sqlite') {
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(path); t.after(() => db.close());
+    const row = db.prepare('SELECT salt,code_hash FROM password_resets WHERE id=?').get(requested.requestId);
+    assert.equal(row.salt.length, 32);
+    assert.equal(row.code_hash.length, 64);
+    assert.notEqual(row.code_hash, deliveries[0].code);
+    assert.doesNotMatch(JSON.stringify(row), new RegExp(deliveries[0].code, 'u'));
+  }
+
+  assert.deepEqual(await store.confirmPasswordReset({ requestId:requested.requestId, code:deliveries[0].code, password:'senha-nova-segura-456' }), { ok:true });
+  assert.equal(await store.session(account.token), null);
+  assert.equal(await store.session(secondSession.token), null);
+  await assert.rejects(store.login({ email:'recuperacao@example.com', password:'senha-antiga-123' }), status(401));
+  const login = await store.login({ email:'recuperacao@example.com', password:'senha-nova-segura-456' });
+  assert.equal(login.session.user.id, account.session.user.id);
+  await assert.rejects(store.confirmPasswordReset({ requestId:requested.requestId, code:deliveries[0].code, password:'outra-senha-segura' }), status(400));
+});
+
+test('código expira, é bloqueado após cinco erros e nunca pode ser reutilizado', async t => {
+  const { store, path, deliveries } = await recoveryFixture(t);
+  const first = await store.requestPasswordReset({ identifier:'recuperacao@example.com', channel:'email' });
+  if (store.backend === 'sqlite') {
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(path); t.after(() => db.close());
+    db.prepare('UPDATE password_resets SET expires_at=? WHERE id=?').run(Date.now() - 1, first.requestId);
+  }
+  await assert.rejects(store.confirmPasswordReset({ requestId:first.requestId, code:deliveries[0].code, password:'senha-nova-segura' }), status(400));
+
+  const second = await store.requestPasswordReset({ identifier:'recuperacao@example.com', channel:'email' });
+  const correctCode = deliveries.at(-1).code;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await assert.rejects(store.confirmPasswordReset({ requestId:second.requestId, code:'000001', password:'senha-nova-segura' }), status(400));
+  }
+  await assert.rejects(store.confirmPasswordReset({ requestId:second.requestId, code:correctCode, password:'senha-nova-segura' }), status(400));
+});
+
+test('solicitação não revela se a conta existe e cada pedido usa ID novo', async t => {
+  const { store, deliveries } = await recoveryFixture(t);
+  const missingA = await store.requestPasswordReset({ identifier:'inexistente@example.com', channel:'email' });
+  const missingB = await store.requestPasswordReset({ identifier:'inexistente@example.com', channel:'email' });
+  assert.equal(missingA.ok, true);
+  assert.equal(missingB.ok, true);
+  assert.notEqual(missingA.requestId, missingB.requestId);
+  assert.equal(deliveries.length, 0);
+
+  const existingA = await store.requestPasswordReset({ identifier:'recuperacao@example.com', channel:'email' });
+  const existingB = await store.requestPasswordReset({ identifier:'recuperacao@example.com', channel:'email' });
+  assert.notEqual(existingA.requestId, existingB.requestId);
+  assert.equal(deliveries.length, 1, 'pedidos no intervalo de segurança reutilizam o código sem gerar novo envio');
+  assert.deepEqual(await store.confirmPasswordReset({ requestId:existingB.requestId, code:deliveries[0].code, password:'senha-nova-segura-789' }), { ok:true });
+});
+
+test('IDs alternativos do intervalo de segurança compartilham o mesmo limite de tentativas', async t => {
+  const { store, deliveries } = await recoveryFixture(t);
+  const first = await store.requestPasswordReset({ identifier:'recuperacao@example.com', channel:'email' });
+  const second = await store.requestPasswordReset({ identifier:'recuperacao@example.com', channel:'email' });
+  assert.equal(deliveries.length, 1);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const requestId = attempt % 2 ? first.requestId : second.requestId;
+    await assert.rejects(store.confirmPasswordReset({ requestId, code:'999999', password:'senha-nova-segura' }), status(400));
+  }
+  await assert.rejects(store.confirmPasswordReset({ requestId:first.requestId, code:deliveries[0].code, password:'senha-nova-segura' }), status(400));
+  await assert.rejects(store.confirmPasswordReset({ requestId:second.requestId, code:deliveries[0].code, password:'senha-nova-segura' }), status(400));
+});
+
+test('recuperação por SMS encontra o telefone normalizado no perfil do atleta', async t => {
+  const { store, deliveries } = await recoveryFixture(t);
+  const result = await store.requestPasswordReset({ identifier:'recuperacao@example.com', channel:'sms' });
+  assert.equal(result.ok, true);
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0].channel, 'sms');
+  assert.equal(deliveries[0].destination, '+5585999990000');
+
 });
 

@@ -209,3 +209,26 @@ test('a conflict reload finishing after another login cannot replace that accoun
   assert.deepEqual(publications.map(x => x.user.id), ['user-alice', 'user-bob']);
   assert.deepEqual(errors, [], 'errors belonging to the previous account should also be discarded');
 });
+
+test('recuperação de senha envia somente os dados esperados sem criar sessão', async t => {
+  const { client, requests, publications, lifecycle, errors } = harness(t, async request => {
+    if (request.path === '/api/password-reset/request') {
+      return response({ ok: true, requestId: 'reset-public-fixture', expiresInSeconds: 600 }, 202);
+    }
+    if (request.path === '/api/password-reset/confirm') return response({ ok: true });
+    assert.fail(`Unexpected request ${request.method} ${request.path}`);
+  });
+
+  const requested = await client.requestPasswordReset({ identifier: 'atleta@example.test', channel: 'email' });
+  assert.equal(requested.requestId, 'reset-public-fixture');
+  await client.resetPassword({ requestId: requested.requestId, code: '123456', password: 'nova-senha-segura' });
+
+  assert.deepEqual(requests, [
+    { path: '/api/password-reset/request', method: 'POST', body: { identifier: 'atleta@example.test', channel: 'email' } },
+    { path: '/api/password-reset/confirm', method: 'POST', body: { requestId: 'reset-public-fixture', code: '123456', password: 'nova-senha-segura' } },
+  ]);
+  assert.equal(client.current, null);
+  assert.deepEqual(publications, []);
+  assert.deepEqual(lifecycle, []);
+  assert.deepEqual(errors, []);
+});
