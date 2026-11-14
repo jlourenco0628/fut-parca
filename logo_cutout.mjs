@@ -188,7 +188,9 @@ export function logoAlphaBounds(data, width, height, threshold = 8) {
 export function squareLogoGeometry(bounds) {
   const width = bounds.right - bounds.left + 1;
   const height = bounds.bottom - bounds.top + 1;
-  const padding = Math.max(2, Math.ceil(Math.max(width, height) * .1));
+  // Keep only a narrow breathing room around the emblem. A larger transparent
+  // border makes small pelada crests look undersized even inside a bigger card slot.
+  const padding = Math.max(2, Math.ceil(Math.max(width, height) * .06));
   const side = Math.max(width, height) + padding * 2;
   return {
     side,
