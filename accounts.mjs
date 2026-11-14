@@ -11,7 +11,7 @@ const PASSWORD_RESET_LIFETIME = 10 * 60 * 1000;
 const PASSWORD_RESET_MAX_ATTEMPTS = 5;
 const PASSWORD_RESET_RESEND_DELAY = 60 * 1000;
 const ATTRIBUTE_KEYS = ['rit', 'fin', 'pas', 'con', 'def', 'fis', 'div', 'han', 'kic', 'ref', 'spd', 'pos'];
-const PERSONAL_FIELDS = new Set(['name', 'nickname', 'contact', 'photo', 'avatar', 'sex', 'birthDate', 'preferences']);
+const PERSONAL_FIELDS = new Set(['name', 'nickname', 'contact', 'photo', 'photoFit', 'avatar', 'sex', 'birthDate', 'preferences']);
 const EVENT_TYPES = new Map(EVENT_RULES.map(rule => [rule.type, rule]));
 const copy = value => structuredClone(value);
 const hashToken = token => createHash('sha256').update(token).digest('hex');
@@ -71,7 +71,7 @@ function uniqueId(seen, value, label) {
 
 function newAthlete(name, email, profile = {}) {
   return {
-    id: `athlete-${randomUUID()}`, name, nickname: String(profile.nickname || name.split(/\s+/u)[0]).slice(0, 18), contact: String(profile.contact || email), photo: String(profile.photo || ''),
+    id: `athlete-${randomUUID()}`, name, nickname: String(profile.nickname || name.split(/\s+/u)[0]).slice(0, 18), contact: String(profile.contact || email), photo: String(profile.photo || ''), photoFit: { x: 0, y: 0, zoom: 100 },
     avatar: ['avatar-1','avatar-2','avatar-3','avatar-4'].includes(profile.avatar) ? profile.avatar : 'avatar-1',
     sex: ['masculino','feminino','nao-binario','prefiro-nao-informar'].includes(profile.sex) ? profile.sex : 'prefiro-nao-informar',
     birthDate: typeof profile.birthDate === 'string' ? profile.birthDate : '',
@@ -384,6 +384,11 @@ function validateState(input, previous, users) {
     object(athlete, 'Atleta'); uniqueId(athleteIds, athlete.id, 'Identificador de atleta');
     text(athlete.name, 'Nome do atleta', 80); text(athlete.nickname, 'Apelido', 18); text(athlete.contact, 'Contato', 254);
     validatePhoto(athlete.photo);
+    if (athlete.photoFit != null) {
+      object(athlete.photoFit, 'Enquadramento da foto');
+      const { x, y, zoom } = athlete.photoFit;
+      if (![x, y, zoom].every(Number.isFinite) || x < -25 || x > 25 || y < -25 || y > 25 || zoom < 85 || zoom > 150) error('Enquadramento da foto inválido.');
+    }
     if (athlete.sex != null && !['masculino','feminino','nao-binario','prefiro-nao-informar'].includes(athlete.sex)) error('Sexo do atleta inválido.');
     if (athlete.avatar != null && !['avatar-1','avatar-2','avatar-3','avatar-4'].includes(athlete.avatar)) error('Avatar inválido.');
     object(athlete.preferences, 'Preferências'); object(athlete.baseSkills, 'Skills');
