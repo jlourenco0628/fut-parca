@@ -93,20 +93,69 @@ function validatePhoto(photo) {
   if (!valid) error('O conteúdo da foto não corresponde ao formato informado.');
 }
 
-function publicSession(user, group) {
+function membershipsOf(user) {
+  const source = Array.isArray(user?.memberships) ? user.memberships : [];
+  const memberships = [];
+  for (const item of source) {
+    if (!item || typeof item.groupId !== 'string' || !['organizer', 'member'].includes(item.role) || memberships.some(value => value.groupId === item.groupId)) continue;
+    memberships.push({ groupId:item.groupId, role:item.role });
+  }
+  if (user?.groupId && !memberships.some(item => item.groupId === user.groupId)) memberships.push({ groupId:user.groupId, role:user.role === 'organizer' ? 'organizer' : 'member' });
+  return memberships;
+}
+
+function membershipRole(user, groupId) {
+  return membershipsOf(user).find(item => item.groupId === groupId)?.role || null;
+}
+
+function setMemoryMembership(user, groupId, role, makeActive = true) {
+  const memberships = membershipsOf(user), current = memberships.find(item => item.groupId === groupId);
+  if (current) current.role = role; else memberships.push({ groupId, role });
+  user.memberships = memberships;
+  if (makeActive) { user.groupId = groupId; user.role = role; }
+}
+
+function setMemoryMembershipRole(user, groupId, role) {
+  setMemoryMembership(user, groupId, role, user.groupId === groupId);
+}
+
+function setMemoryActiveGroup(user, groupId) {
+  const membership = membershipsOf(user).find(item => item.groupId === groupId);
+  if (!membership) error('Você não faz parte desta pelada.', 403);
+  user.memberships = membershipsOf(user); user.groupId = groupId; user.role = membership.role;
+}
+
+function removeMemoryMembership(user, groupId) {
+  user.memberships = membershipsOf(user).filter(item => item.groupId !== groupId);
+  if (user.groupId === groupId) {
+    const next = user.memberships[0];
+    if (next) { user.groupId = next.groupId; user.role = next.role; }
+  }
+}
+
+function publicSession(user, group, availableGroups = []) {
+  const role = membershipRole(user, group.id) || (user.role === 'organizer' ? 'organizer' : 'member');
   return {
     user: { id: user.id, name: user.name, email: user.email },
-    group: { id: group.id, name: group.name, role: user.role, profileOnly: Boolean(group.state.profileOnly), logo: group.state.logo || '', scheduleType: group.state.scheduleType || 'recurring', weeklyDay: group.state.weeklyDay || '', weeklyTime: group.state.weeklyTime || '', singleDate: group.state.singleDate || '', singleTime: group.state.singleTime || '', ...(user.role === 'organizer' ? { inviteCode: group.inviteCode } : {}) },
+    group: { id: group.id, name: group.name, role, profileOnly: Boolean(group.state.profileOnly), logo: group.state.logo || '', scheduleType: group.state.scheduleType || 'recurring', weeklyDay: group.state.weeklyDay || '', weeklyTime: group.state.weeklyTime || '', singleDate: group.state.singleDate || '', singleTime: group.state.singleTime || '', ...(role === 'organizer' ? { inviteCode: group.inviteCode } : {}) },
+    groups: availableGroups.map(({ group:item, role:itemRole }) => ({ id:item.id, name:item.name, role:itemRole, profileOnly:Boolean(item.state.profileOnly), logo:item.state.logo || '', ...(itemRole === 'organizer' ? { inviteCode:item.inviteCode } : {}) })),
     athleteId: user.athleteId, revision: group.revision, state: copy(group.state),
   };
 }
 
 function normalizeRepositoryData(value) {
   const data = value && typeof value === 'object' ? value : {};
+  const groups = Array.isArray(data.groups) ? data.groups : [], groupIds = new Set(groups.map(group => group.id));
+  const users = (Array.isArray(data.users) ? data.users : []).map(source => {
+    const user = { ...source }, memberships = membershipsOf(user).filter(item => groupIds.has(item.groupId));
+    if (!memberships.length && user.groupId && groupIds.has(user.groupId)) memberships.push({ groupId:user.groupId, role:user.role === 'organizer' ? 'organizer' : 'member' });
+    const active = memberships.find(item => item.groupId === user.groupId) || memberships[0];
+    return { ...user, memberships, ...(active ? { groupId:active.groupId, role:active.role } : {}) };
+  });
   return {
-    version: 3,
-    users: Array.isArray(data.users) ? data.users : [],
-    groups: Array.isArray(data.groups) ? data.groups : [],
+    version: 4,
+    users,
+    groups,
     sessions: Array.isArray(data.sessions) ? data.sessions : [],
     joinRequests: Array.isArray(data.joinRequests) ? data.joinRequests : [],
     passwordResets: Array.isArray(data.passwordResets) ? data.passwordResets : [],
@@ -155,14 +204,16 @@ async function openSupabaseRepository({ url, key, secret }) {
       error('Os dados foram atualizados ao mesmo tempo em outro aparelho. Tente novamente.', 409);
     },
     userByEmail: email => read(() => data.users.find(user => user.email === email)), userById: id => read(() => data.users.find(user => user.id === id)),
-    usersForGroup: id => read(() => data.users.filter(user => user.groupId === id)), groupById: id => read(() => data.groups.find(group => group.id === id)),
+    usersForGroup: id => read(() => data.users.filter(user => membershipsOf(user).some(item => item.groupId === id))), groupById: id => read(() => data.groups.find(group => group.id === id)),
     groupByInvite: code => read(() => data.groups.find(group => group.inviteCode === code)), insertGroup: group => data.groups.push(copy(group)),
     allGroups: () => read(() => data.groups.map(copy)),
     updateGroup(group) { data.groups[data.groups.findIndex(item => item.id === group.id)] = copy(group); },
     deleteGroup(id) { data.groups = data.groups.filter(group => group.id !== id); },
     insertUser: user => data.users.push(copy(user)),
-    updateUserRole(id, role) { const user = data.users.find(item => item.id === id); if (user) user.role = role; },
-    updateUserMembership(id, groupId, role) { const user = data.users.find(item => item.id === id); if (user) { user.groupId = groupId; user.role = role; } },
+    updateUserRole(id, groupId, role) { const user = data.users.find(item => item.id === id); if (user) setMemoryMembershipRole(user, groupId, role); },
+    updateUserMembership(id, groupId, role, makeActive = true) { const user = data.users.find(item => item.id === id); if (user) setMemoryMembership(user, groupId, role, makeActive); },
+    setActiveGroup(id, groupId) { const user = data.users.find(item => item.id === id); if (user) setMemoryActiveGroup(user, groupId); },
+    removeUserMembership(id, groupId) { const user = data.users.find(item => item.id === id); if (user) removeMemoryMembership(user, groupId); },
     updateUserPassword(id, salt, hash) { const user = data.users.find(item => item.id === id); if (user) { user.salt = salt; user.hash = hash; } },
     requestByUserGroup: (userId, groupId) => read(() => data.joinRequests.find(item => item.userId === userId && item.groupId === groupId)),
     requestsForGroup: groupId => read(() => data.joinRequests.filter(item => item.groupId === groupId)),
@@ -220,14 +271,16 @@ async function openPostgresRepository(databaseUrl) {
       } finally { client.release(); }
     },
     userByEmail: email => read(() => data.users.find(user => user.email === email)), userById: id => read(() => data.users.find(user => user.id === id)),
-    usersForGroup: id => read(() => data.users.filter(user => user.groupId === id)), groupById: id => read(() => data.groups.find(group => group.id === id)),
+    usersForGroup: id => read(() => data.users.filter(user => membershipsOf(user).some(item => item.groupId === id))), groupById: id => read(() => data.groups.find(group => group.id === id)),
     groupByInvite: code => read(() => data.groups.find(group => group.inviteCode === code)), insertGroup: group => data.groups.push(copy(group)),
     allGroups: () => read(() => data.groups.map(copy)),
     updateGroup(group) { data.groups[data.groups.findIndex(item => item.id === group.id)] = copy(group); },
     deleteGroup(id) { data.groups = data.groups.filter(group => group.id !== id); },
     insertUser: user => data.users.push(copy(user)),
-    updateUserRole(id, role) { const user = data.users.find(item => item.id === id); if (user) user.role = role; },
-    updateUserMembership(id, groupId, role) { const user = data.users.find(item => item.id === id); if (user) { user.groupId = groupId; user.role = role; } },
+    updateUserRole(id, groupId, role) { const user = data.users.find(item => item.id === id); if (user) setMemoryMembershipRole(user, groupId, role); },
+    updateUserMembership(id, groupId, role, makeActive = true) { const user = data.users.find(item => item.id === id); if (user) setMemoryMembership(user, groupId, role, makeActive); },
+    setActiveGroup(id, groupId) { const user = data.users.find(item => item.id === id); if (user) setMemoryActiveGroup(user, groupId); },
+    removeUserMembership(id, groupId) { const user = data.users.find(item => item.id === id); if (user) removeMemoryMembership(user, groupId); },
     updateUserPassword(id, salt, hash) { const user = data.users.find(item => item.id === id); if (user) { user.salt = salt; user.hash = hash; } },
     requestByUserGroup: (userId, groupId) => read(() => data.joinRequests.find(item => item.userId === userId && item.groupId === groupId)),
     requestsForGroup: groupId => read(() => data.joinRequests.filter(item => item.groupId === groupId)),
@@ -266,28 +319,53 @@ async function openRepository(path, databaseUrl, supabase) {
     db.exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS groups (id TEXT PRIMARY KEY, name TEXT NOT NULL, invite_code TEXT NOT NULL UNIQUE, revision INTEGER NOT NULL, state_json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, group_id TEXT NOT NULL REFERENCES groups(id), role TEXT NOT NULL, athlete_id TEXT NOT NULL, password_salt TEXT NOT NULL, password_hash TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS memberships (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE, role TEXT NOT NULL, PRIMARY KEY(user_id, group_id));
       CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS join_requests (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), group_id TEXT NOT NULL REFERENCES groups(id), status TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(user_id, group_id));
       CREATE TABLE IF NOT EXISTS password_resets (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, channel TEXT NOT NULL, salt TEXT NOT NULL, code_hash TEXT NOT NULL, expires_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);
-      CREATE INDEX IF NOT EXISTS password_resets_user ON password_resets(user_id,channel,created_at);`);
+      CREATE INDEX IF NOT EXISTS password_resets_user ON password_resets(user_id,channel,created_at);
+      INSERT OR IGNORE INTO memberships(user_id,group_id,role) SELECT id,group_id,role FROM users;`);
     const groupRow = row => row ? { id: row.id, name: row.name, inviteCode: row.invite_code, revision: row.revision, state: JSON.parse(row.state_json) } : undefined;
-    const userRow = row => row ? { id: row.id, name: row.name, email: row.email, groupId: row.group_id, role: row.role, athleteId: row.athlete_id, salt: row.password_salt, hash: row.password_hash } : undefined;
+    const userRow = row => row ? { id: row.id, name: row.name, email: row.email, groupId: row.group_id, role: row.role, athleteId: row.athlete_id, salt: row.password_salt, hash: row.password_hash, memberships:db.prepare('SELECT group_id,role FROM memberships WHERE user_id=? ORDER BY rowid').all(row.id).map(item => ({ groupId:item.group_id, role:item.role })) } : undefined;
     return {
       kind: 'sqlite', path,
       transaction(fn) { db.exec('BEGIN IMMEDIATE'); try { const result = fn(); db.exec('COMMIT'); return result; } catch (err) { db.exec('ROLLBACK'); throw err; } },
       userByEmail: email => userRow(db.prepare('SELECT * FROM users WHERE email=?').get(email)),
       userById: id => userRow(db.prepare('SELECT * FROM users WHERE id=?').get(id)),
-      usersForGroup: id => db.prepare('SELECT * FROM users WHERE group_id=?').all(id).map(userRow),
+      usersForGroup: id => db.prepare('SELECT users.* FROM users JOIN memberships ON memberships.user_id=users.id WHERE memberships.group_id=?').all(id).map(userRow),
       groupById: id => groupRow(db.prepare('SELECT * FROM groups WHERE id=?').get(id)),
       groupByInvite: code => groupRow(db.prepare('SELECT * FROM groups WHERE invite_code=?').get(code)),
       allGroups: () => db.prepare('SELECT * FROM groups').all().map(groupRow),
       insertGroup(group) { db.prepare('INSERT INTO groups VALUES (?,?,?,?,?)').run(group.id, group.name, group.inviteCode, group.revision, JSON.stringify(group.state)); },
       updateGroup(group) { db.prepare('UPDATE groups SET name=?,revision=?,state_json=? WHERE id=?').run(group.name, group.revision, JSON.stringify(group.state), group.id); },
       deleteGroup(id) { db.prepare('DELETE FROM groups WHERE id=?').run(id); },
-      insertUser(user) { db.prepare('INSERT INTO users VALUES (?,?,?,?,?,?,?,?)').run(user.id, user.name, user.email, user.groupId, user.role, user.athleteId, user.salt, user.hash); },
-      updateUserRole(id, role) { db.prepare('UPDATE users SET role=? WHERE id=?').run(role, id); },
-      updateUserMembership(id, groupId, role) { db.prepare('UPDATE users SET group_id=?,role=? WHERE id=?').run(groupId, role, id); },
+      insertUser(user) {
+        db.prepare('INSERT INTO users VALUES (?,?,?,?,?,?,?,?)').run(user.id, user.name, user.email, user.groupId, user.role, user.athleteId, user.salt, user.hash);
+        const insert = db.prepare('INSERT INTO memberships(user_id,group_id,role) VALUES (?,?,?)');
+        for (const membership of membershipsOf(user)) insert.run(user.id, membership.groupId, membership.role);
+      },
+      updateUserRole(id, groupId, role) {
+        db.prepare('UPDATE memberships SET role=? WHERE user_id=? AND group_id=?').run(role, id, groupId);
+        db.prepare('UPDATE users SET role=? WHERE id=? AND group_id=?').run(role, id, groupId);
+      },
+      updateUserMembership(id, groupId, role, makeActive = true) {
+        db.prepare('INSERT INTO memberships(user_id,group_id,role) VALUES (?,?,?) ON CONFLICT(user_id,group_id) DO UPDATE SET role=excluded.role').run(id, groupId, role);
+        if (makeActive) db.prepare('UPDATE users SET group_id=?,role=? WHERE id=?').run(groupId, role, id);
+      },
+      setActiveGroup(id, groupId) {
+        const membership = db.prepare('SELECT role FROM memberships WHERE user_id=? AND group_id=?').get(id, groupId);
+        if (!membership) error('Você não faz parte desta pelada.', 403);
+        db.prepare('UPDATE users SET group_id=?,role=? WHERE id=?').run(groupId, membership.role, id);
+      },
+      removeUserMembership(id, groupId) {
+        const user = db.prepare('SELECT group_id FROM users WHERE id=?').get(id);
+        db.prepare('DELETE FROM memberships WHERE user_id=? AND group_id=?').run(id, groupId);
+        if (user?.group_id === groupId) {
+          const next = db.prepare('SELECT group_id,role FROM memberships WHERE user_id=? ORDER BY rowid LIMIT 1').get(id);
+          if (next) db.prepare('UPDATE users SET group_id=?,role=? WHERE id=?').run(next.group_id, next.role, id);
+        }
+      },
       updateUserPassword(id, salt, hash) { db.prepare('UPDATE users SET password_salt=?,password_hash=? WHERE id=?').run(salt, hash, id); },
       requestByUserGroup(userId, groupId) { return db.prepare('SELECT * FROM join_requests WHERE user_id=? AND group_id=?').get(userId, groupId); },
       requestsForGroup(groupId) { return db.prepare('SELECT * FROM join_requests WHERE group_id=? ORDER BY created_at').all(groupId); },
@@ -320,31 +398,31 @@ async function openRepository(path, databaseUrl, supabase) {
     };
   }
   const jsonPath = `${path}.json`;
-  let data = existsSync(jsonPath) ? JSON.parse(readFileSync(jsonPath, 'utf8')) : { version: 3, users: [], groups: [], sessions: [], joinRequests: [], passwordResets: [] };
-  data.joinRequests ||= [];
-  data.passwordResets ||= [];
+  let data = normalizeRepositoryData(existsSync(jsonPath) ? JSON.parse(readFileSync(jsonPath, 'utf8')) : { version: 4, users: [], groups: [], sessions: [], joinRequests: [], passwordResets: [] });
   let inTransaction = false;
   const persist = () => { const temporary = `${jsonPath}.${randomUUID()}.tmp`; writeFileSync(temporary, JSON.stringify(data), { encoding: 'utf8', mode: 0o600 }); renameSync(temporary, jsonPath); };
-  const read = fn => { if (!inTransaction) data = JSON.parse(readFileSync(jsonPath, 'utf8')); return fn(); };
+  const read = fn => { if (!inTransaction) data = normalizeRepositoryData(JSON.parse(readFileSync(jsonPath, 'utf8'))); return fn(); };
   if (!existsSync(jsonPath)) persist();
   return {
     kind: 'json', path: jsonPath,
     transaction(fn) {
       // Recarregar também evita revisões antigas em duas instâncias no mesmo processo.
-      data = JSON.parse(readFileSync(jsonPath, 'utf8'));
+      data = normalizeRepositoryData(JSON.parse(readFileSync(jsonPath, 'utf8')));
       const previous = copy(data);
       inTransaction = true;
       try { const result = fn(); persist(); return result; } catch (err) { data = previous; throw err; } finally { inTransaction = false; }
     },
     userByEmail: email => read(() => data.users.find(user => user.email === email)), userById: id => read(() => data.users.find(user => user.id === id)),
-    usersForGroup: id => read(() => data.users.filter(user => user.groupId === id)), groupById: id => read(() => data.groups.find(group => group.id === id)),
+    usersForGroup: id => read(() => data.users.filter(user => membershipsOf(user).some(item => item.groupId === id))), groupById: id => read(() => data.groups.find(group => group.id === id)),
     groupByInvite: code => read(() => data.groups.find(group => group.inviteCode === code)), insertGroup: group => data.groups.push(copy(group)),
     allGroups: () => read(() => data.groups.map(copy)),
     updateGroup(group) { data.groups[data.groups.findIndex(item => item.id === group.id)] = copy(group); },
     deleteGroup(id) { data.groups = data.groups.filter(group => group.id !== id); },
     insertUser: user => data.users.push(copy(user)),
-    updateUserRole(id, role) { const user = data.users.find(item => item.id === id); if (user) user.role = role; },
-    updateUserMembership(id, groupId, role) { const user = data.users.find(item => item.id === id); if (user) { user.groupId = groupId; user.role = role; } },
+    updateUserRole(id, groupId, role) { const user = data.users.find(item => item.id === id); if (user) setMemoryMembershipRole(user, groupId, role); },
+    updateUserMembership(id, groupId, role, makeActive = true) { const user = data.users.find(item => item.id === id); if (user) setMemoryMembership(user, groupId, role, makeActive); },
+    setActiveGroup(id, groupId) { const user = data.users.find(item => item.id === id); if (user) setMemoryActiveGroup(user, groupId); },
+    removeUserMembership(id, groupId) { const user = data.users.find(item => item.id === id); if (user) removeMemoryMembership(user, groupId); },
     updateUserPassword(id, salt, hash) { const user = data.users.find(item => item.id === id); if (user) { user.salt = salt; user.hash = hash; } },
     requestByUserGroup: (userId, groupId) => read(() => data.joinRequests.find(item => item.userId === userId && item.groupId === groupId)),
     requestsForGroup: groupId => read(() => data.joinRequests.filter(item => item.groupId === groupId)),
@@ -564,20 +642,29 @@ export async function createAccountStore({ path, databaseUrl, supabase, recovery
   const repository = await openRepository(path, databaseUrl, supabase);
   const recoveryChannels = new Set(Array.isArray(recoveryDelivery?.channels) ? recoveryDelivery.channels.filter(channel => channel === 'email' || channel === 'sms') : []);
   let closed = false;
+  const availableGroupsFor = user => membershipsOf(user).map(membership => ({ group:repository.groupById(membership.groupId), role:membership.role })).filter(item => item.group);
+  const sessionFor = (user, group) => publicSession(user, group, availableGroupsFor(user));
+  const profileForUser = user => {
+    for (const membership of membershipsOf(user)) {
+      const group = repository.groupById(membership.groupId), profile = group?.state?.athletes?.find(item => item.id === user.athleteId);
+      if (profile) return { group, profile };
+    }
+    return null;
+  };
   const lookup = token => {
     if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) return null;
     const hash = hashToken(token), entry = repository.sessionByHash(hash);
     if (!entry || entry.expiresAt <= Date.now()) return null;
     const user = repository.userById(entry.userId);
     if (!user) return null;
-    const group = repository.groupById(user.groupId);
+    const active = membershipsOf(user).find(item => item.groupId === user.groupId) || membershipsOf(user)[0];
+    const group = active ? repository.groupById(active.groupId) : null;
     return group ? { user, group } : null;
   };
   const requireSession = token => lookup(token) || error('Entre na sua conta para continuar.', 401);
   const issueSession = user => { const token = randomBytes(32).toString('hex'); repository.insertSession(hashToken(token), user.id, Date.now() + SESSION_LIFETIME); return token; };
   const phoneForUser = user => {
-    const group = repository.groupById(user.groupId);
-    const athlete = group?.state?.athletes?.find(item => item.id === user.athleteId);
+    const athlete = profileForUser(user)?.profile;
     return normalizedPhone(athlete?.contact);
   };
   const resetFailure = () => error('Código inválido ou expirado. Solicite um novo código.', 400);
@@ -605,10 +692,11 @@ export async function createAccountStore({ path, databaseUrl, supabase, recovery
           group = { id: `group-${randomUUID()}`, name: groupName || 'Meu perfil', inviteCode: code, revision: 1, state: { version: 1, athletes: [athlete], rounds: [], ...(!groupName ? { profileOnly: true } : {}) } };
           repository.insertGroup(group);
         }
-        const user = { id: `user-${randomUUID()}`, name, email, groupId: group.id, role: inviteCode || !groupName ? 'member' : 'organizer', athleteId: athlete.id, salt, hash };
+        const role = inviteCode || !groupName ? 'member' : 'organizer';
+        const user = { id: `user-${randomUUID()}`, name, email, groupId: group.id, role, memberships:[{ groupId:group.id, role }], athleteId: athlete.id, salt, hash };
         repository.insertUser(user);
         const token = issueSession(user);
-        return { token, session: publicSession(user, group) };
+        return { token, session: sessionFor(user, group) };
       });
     },
     async login(input = {}) {
@@ -618,7 +706,7 @@ export async function createAccountStore({ path, databaseUrl, supabase, recovery
       const candidate = await scrypt(input.password, user?.salt || 'fut-parca-invalid-account', 64);
       const expected = user ? Buffer.from(user.hash, 'hex') : Buffer.alloc(64);
       if (!user || candidate.length !== expected.length || !timingSafeEqual(candidate, expected)) error('E-mail ou senha incorretos.', 401);
-      return repository.transaction(() => { const current = repository.userById(user.id); return { token: issueSession(current), session: publicSession(current, repository.groupById(current.groupId)) }; });
+      return repository.transaction(() => { const current = repository.userById(user.id), group = repository.groupById(current.groupId); return { token: issueSession(current), session: sessionFor(current, group) }; });
     },
     async requestPasswordReset(input = {}) {
       const channel = input.channel === 'sms' ? 'sms' : input.channel === 'email' ? 'email' : error('Escolha recuperação por e-mail ou SMS.');
@@ -689,7 +777,7 @@ export async function createAccountStore({ path, databaseUrl, supabase, recovery
         return { ok:true };
       });
     },
-    async session(token) { const current = lookup(token); return current ? publicSession(current.user, current.group) : null; },
+    async session(token) { const current = lookup(token); return current ? sessionFor(current.user, current.group) : null; },
     async logout(token) { if (typeof token === 'string' && /^[a-f0-9]{64}$/.test(token)) await repository.transaction(() => repository.deleteSession(hashToken(token))); return { ok: true }; },
     async deleteAccount(token, input = {}) {
       const current = requireSession(token);
@@ -698,24 +786,25 @@ export async function createAccountStore({ path, databaseUrl, supabase, recovery
       const expected = Buffer.from(current.user.hash, 'hex');
       if (candidate.length !== expected.length || !timingSafeEqual(candidate, expected)) error('Senha incorreta.', 401);
       return repository.transaction(() => {
-        const { user, group } = requireSession(token);
+        const { user } = requireSession(token);
         if (user.id !== current.user.id) error('Entre novamente para excluir sua conta.', 401);
-        const members = repository.usersForGroup(group.id);
         repository.deleteSessionsForUser(user.id);
         repository.deletePasswordResetsForUser(user.id);
-        repository.deleteUser(user.id);
-        if (members.length === 1) {
-          repository.deleteGroup(group.id);
-          return { ok: true, groupDeleted: true };
+        const groupsToDelete = [];
+        for (const { group, role } of availableGroupsFor(user)) {
+          const members = repository.usersForGroup(group.id), others = members.filter(member => member.id !== user.id);
+          if (!others.length) { groupsToDelete.push(group.id); continue; }
+          if (role === 'organizer') repository.updateUserRole(others[0].id, group.id, 'organizer');
+          group.state = withoutAccountData(group.state, user);
+          group.revision++;
+          repository.updateGroup(group);
         }
-        if (user.role === 'organizer') repository.updateUserRole(members.find(member => member.id !== user.id).id, 'organizer');
-        group.state = withoutAccountData(group.state, user);
-        group.revision++;
-        repository.updateGroup(group);
-        return { ok: true, groupDeleted: false };
+        repository.deleteUser(user.id);
+        for (const groupId of groupsToDelete) repository.deleteGroup(groupId);
+        return { ok:true, groupDeleted:groupsToDelete.length > 0 };
       });
     },
-    async getState(token) { const { user, group } = requireSession(token); return publicSession(user, group); },
+    async getState(token) { const { user, group } = requireSession(token); return sessionFor(user, group); },
     async searchGroups(query = '') {
       const raw = String(query || '').trim().slice(0, 100), term = normalizedGroupName(raw);
       return repository.allGroups().filter(group => !group.state.profileOnly && (!term || normalizedGroupName(group.name).includes(term) || group.id.toLocaleLowerCase('pt-BR').includes(raw.toLocaleLowerCase('pt-BR')) || group.inviteCode.toLocaleLowerCase('pt-BR').includes(raw.toLocaleLowerCase('pt-BR')))).slice(0, 40).map(group => ({ id: group.id, publicId: group.inviteCode, name: group.name, logo: group.state.logo || '', scheduleType: group.state.scheduleType || 'recurring', weeklyDay: group.state.weeklyDay || '', weeklyTime: group.state.weeklyTime || '', singleDate: group.state.singleDate || '', singleTime: group.state.singleTime || '', members: group.state.athletes.length }));
@@ -723,10 +812,9 @@ export async function createAccountStore({ path, databaseUrl, supabase, recovery
     async createGroup(token, input = {}) {
       return repository.transaction(() => {
         const { user, group } = requireSession(token);
-        if (!group.state.profileOnly) error('Você já faz parte de uma pelada.', 409);
+        if (membershipsOf(user).filter(item => !repository.groupById(item.groupId)?.state?.profileOnly).length >= 20) error('Sua conta atingiu o limite de 20 peladas.', 409);
         const name = text(input.name, 'Nome da pelada', 80, 2);
-        if (repository.allGroups().some(item => item.id !== group.id && !item.state.profileOnly && normalizedGroupName(item.name) === normalizedGroupName(name))) error('Já existe uma pelada com este nome. Escolha outro.', 409);
-        group.name = name;
+        if (repository.allGroups().some(item => !item.state.profileOnly && normalizedGroupName(item.name) === normalizedGroupName(name))) error('Já existe uma pelada com este nome. Escolha outro.', 409);
         validatePhoto(String(input.logo || ''));
         const scheduleType = input.scheduleType === 'single' ? 'single' : 'recurring';
         const weeklyDay = scheduleType === 'recurring' ? text(input.weeklyDay, 'Dia da semana', 12) : '';
@@ -735,33 +823,59 @@ export async function createAccountStore({ path, databaseUrl, supabase, recovery
         const singleTime = scheduleType === 'single' ? text(input.singleTime, 'Horário', 5) : '';
         if (scheduleType === 'recurring' && (!['Segunda','Terça','Quarta','Quinta','Sexta','Sábado','Domingo'].includes(weeklyDay) || !/^\d{2}:\d{2}$/.test(weeklyTime))) error('Dia ou horário da pelada fixa inválido.');
         if (scheduleType === 'single' && (!/^\d{4}-\d{2}-\d{2}$/.test(singleDate) || !Number.isFinite(Date.parse(singleDate)) || !/^\d{2}:\d{2}$/.test(singleTime))) error('Data ou horário da pelada avulsa inválido.');
-        group.state = { ...group.state, profileOnly: false, logo: String(input.logo || ''), scheduleType, weeklyDay, weeklyTime, singleDate, singleTime };
-        group.revision++; repository.updateGroup(group); repository.updateUserRole(user.id, 'organizer'); user.role = 'organizer';
-        return publicSession(user, group);
+        let created;
+        if (group.state.profileOnly && membershipsOf(user).length === 1) {
+          created = group;
+          created.name = name;
+          created.state = { ...created.state, profileOnly:false, logo:String(input.logo || ''), scheduleType, weeklyDay, weeklyTime, singleDate, singleTime };
+          created.revision++;
+          repository.updateGroup(created);
+          repository.updateUserRole(user.id, created.id, 'organizer');
+        } else {
+          const profile = profileForUser(user)?.profile;
+          if (!profile) error('Seu perfil de atleta não foi encontrado.', 409);
+          let code; do { code = randomBytes(6).toString('hex').toUpperCase(); } while (repository.groupByInvite(code));
+          created = { id:`group-${randomUUID()}`, name, inviteCode:code, revision:1, state:{ version:1, athletes:[copy(profile)], rounds:[], profileOnly:false, logo:String(input.logo || ''), scheduleType, weeklyDay, weeklyTime, singleDate, singleTime } };
+          repository.insertGroup(created);
+          repository.updateUserMembership(user.id, created.id, 'organizer', true);
+        }
+        const current = repository.userById(user.id);
+        return sessionFor(current, created);
       });
     },
     async joinByInvite(token, inviteCode) {
       return repository.transaction(() => {
         const { user, group } = requireSession(token);
-        if (!group.state.profileOnly) error('Você já faz parte de uma pelada.', 409);
         const code = text(inviteCode, 'Convite', 24).toUpperCase();
         const target = repository.groupByInvite(code);
-        if (!target || target.state.profileOnly || target.id === group.id) error('Link de convite inválido ou expirado.', 404);
+        if (!target || target.state.profileOnly) error('Link de convite inválido ou expirado.', 404);
+        if (membershipRole(user, target.id)) {
+          repository.setActiveGroup(user.id, target.id);
+          const current = repository.userById(user.id);
+          return sessionFor(current, target);
+        }
+        if (membershipsOf(user).filter(item => !repository.groupById(item.groupId)?.state?.profileOnly).length >= 20) error('Sua conta atingiu o limite de 20 peladas.', 409);
         if (target.state.athletes.length >= 300) error('Esta pelada atingiu o limite de atletas.', 409);
-        const profile = group.state.athletes.find(athlete => athlete.id === user.athleteId);
+        const source = profileForUser(user), profile = source?.profile;
         if (!profile) error('Seu perfil de atleta não foi encontrado.', 409);
-        target.state.athletes.push(profile); target.revision++; repository.updateGroup(target);
-        repository.updateUserMembership(user.id, target.id, 'member'); repository.deleteGroup(group.id);
-        user.groupId = target.id; user.role = 'member';
-        return publicSession(user, target);
+        if (!target.state.athletes.some(athlete => athlete.id === user.athleteId)) target.state.athletes.push(copy(profile));
+        target.revision++; repository.updateGroup(target);
+        repository.updateUserMembership(user.id, target.id, 'member', true);
+        if (source.group.state.profileOnly && membershipsOf(user).length === 1) {
+          repository.removeUserMembership(user.id, source.group.id);
+          repository.deleteGroup(source.group.id);
+        }
+        const current = repository.userById(user.id);
+        return sessionFor(current, target);
       });
     },
     async requestJoin(token, groupId) {
       return repository.transaction(() => {
-        const { user, group } = requireSession(token);
-        if (!group.state.profileOnly) error('Você já faz parte de uma pelada.', 409);
+        const { user } = requireSession(token);
         const target = repository.groupById(identifier(groupId, 'Pelada'));
         if (!target || target.state.profileOnly) error('Pelada não encontrada.', 404);
+        if (membershipRole(user, target.id)) error('Você já faz parte desta pelada.', 409);
+        if (membershipsOf(user).filter(item => !repository.groupById(item.groupId)?.state?.profileOnly).length >= 20) error('Sua conta atingiu o limite de 20 peladas.', 409);
         const previous = repository.requestByUserGroup(user.id, target.id);
         if (previous?.status === 'pending') error('Seu pedido já está aguardando aprovação.', 409);
         const request = { id: `request-${randomUUID()}`, userId: user.id, groupId: target.id, status: 'pending', createdAt: new Date().toISOString() };
@@ -772,7 +886,7 @@ export async function createAccountStore({ path, databaseUrl, supabase, recovery
     async joinRequests(token) {
       const { user, group } = requireSession(token);
       if (user.role !== 'organizer') error('Só o organizador pode ver os pedidos.', 403);
-      return repository.requestsForGroup(group.id).filter(item => item.status === 'pending').map(item => { const applicant = repository.userById(item.user_id || item.userId); const source = applicant && repository.groupById(applicant.groupId); const profile = source?.state.athletes.find(a => a.id === applicant.athleteId); return { id: item.id, name: applicant?.name || 'Atleta', nickname: profile?.nickname || '', sex: profile?.sex || '', photo: profile?.photo || '' }; });
+      return repository.requestsForGroup(group.id).filter(item => item.status === 'pending').map(item => { const applicant = repository.userById(item.user_id || item.userId), profile = applicant ? profileForUser(applicant)?.profile : null; return { id:item.id, name:applicant?.name || 'Atleta', nickname:profile?.nickname || '', sex:profile?.sex || '', photo:profile?.photo || '' }; });
     },
     async decideJoin(token, requestId, decision) {
       return repository.transaction(() => {
@@ -783,13 +897,27 @@ export async function createAccountStore({ path, databaseUrl, supabase, recovery
         if (!request || requestGroupId !== group.id || request.status !== 'pending') error('Pedido não encontrado.', 404);
         if (decision !== 'approve' && decision !== 'reject') error('Decisão inválida.');
         if (decision === 'reject') { repository.updateRequest(request.id, 'rejected'); return { ok: true }; }
-        const applicant = repository.userById(requestUserId), source = applicant && repository.groupById(applicant.groupId);
-        if (!applicant || !source?.state.profileOnly) error('Este atleta já entrou em outra pelada.', 409);
-        const profile = source.state.athletes.find(a => a.id === applicant.athleteId);
+        const applicant = repository.userById(requestUserId), source = applicant && profileForUser(applicant);
+        if (!applicant || membershipRole(applicant, group.id)) error('Este atleta já faz parte da pelada.', 409);
+        const profile = source?.profile;
         if (!profile || group.state.athletes.length >= 300) error('Não foi possível adicionar este atleta.');
-        group.state.athletes.push(profile); group.revision++; repository.updateGroup(group);
-        repository.updateUserMembership(applicant.id, group.id, 'member'); repository.updateRequest(request.id, 'approved'); repository.deleteGroup(source.id);
+        if (!group.state.athletes.some(athlete => athlete.id === applicant.athleteId)) group.state.athletes.push(copy(profile));
+        group.revision++; repository.updateGroup(group);
+        const onlyProfile = Boolean(source.group.state.profileOnly && membershipsOf(applicant).length === 1);
+        repository.updateUserMembership(applicant.id, group.id, 'member', onlyProfile);
+        if (onlyProfile) { repository.removeUserMembership(applicant.id, source.group.id); repository.deleteGroup(source.group.id); }
+        repository.updateRequest(request.id, 'approved');
         return { ok: true };
+      });
+    },
+    async switchGroup(token, groupId) {
+      return repository.transaction(() => {
+        const { user } = requireSession(token), id = identifier(groupId, 'Pelada');
+        if (!membershipRole(user, id)) error('Você não faz parte desta pelada.', 403);
+        const group = repository.groupById(id);
+        if (!group) error('Pelada não encontrada.', 404);
+        repository.setActiveGroup(user.id, id);
+        return sessionFor(repository.userById(user.id), group);
       });
     },
     async saveState(token, input = {}) {
@@ -800,7 +928,7 @@ export async function createAccountStore({ path, databaseUrl, supabase, recovery
         const next = validateState(input.state, group.state, repository.usersForGroup(group.id));
         if (user.role !== 'organizer') validateMemberChanges(group.state, next, user);
         group.state = next; group.revision++; repository.updateGroup(group);
-        return publicSession(user, group);
+        return sessionFor(user, group);
       });
     },
     async close() { if (!closed) { repository.close(); closed = true; } },

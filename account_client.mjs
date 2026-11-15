@@ -7,7 +7,7 @@ export function createAccountClient({onSession,onSignedOut,onError}) {
     return payload;
   }
   function publish(session){current=session;onSession(session);}
-  async function sync(){if(!current||saving)return;const captured=generation;try{const next=await request('/api/state');if(captured!==generation||!current)return;if(next.revision!==current.revision)publish(next);}catch(err){if(captured!==generation)return;if(err.code===401){current=null;generation++;onSignedOut();onError('Sua sessão terminou. Entre novamente.');}else onError(err.message);}}
+  async function sync(){if(!current||saving)return;const captured=generation;try{const next=await request('/api/state');if(captured!==generation||!current)return;if(next.revision!==current.revision||next.group.id!==current.group.id||JSON.stringify(next.groups||[])!==JSON.stringify(current.groups||[]))publish(next);}catch(err){if(captured!==generation)return;if(err.code===401){current=null;generation++;onSignedOut();onError('Sua sessão terminou. Entre novamente.');}else onError(err.message);}}
   return {
     get current(){return current;},get saving(){return saving>0;},
     async ready(){try{publish(await request('/api/session'));}catch(err){if(err.code!==401)onError('O modo de contas está indisponível. A demonstração continua funcionando.');}},
@@ -16,11 +16,12 @@ export function createAccountClient({onSession,onSignedOut,onError}) {
     requestPasswordReset(data){return request('/api/password-reset/request','POST',data);},
     resetPassword(data){return request('/api/password-reset/confirm','POST',data);},
     searchGroups(query=''){return request(`/api/peladas?q=${encodeURIComponent(query)}`);},
-    async createGroup(data){const next=await request('/api/peladas','POST',data);publish(next);return next;},
-    async joinByInvite(inviteCode){const next=await request('/api/pelada-convite','POST',{inviteCode});publish(next);return next;},
+    async createGroup(data){await pending;const captured=++generation,next=await request('/api/peladas','POST',data);if(captured===generation)publish(next);return next;},
+    async joinByInvite(inviteCode){await pending;const captured=++generation,next=await request('/api/pelada-convite','POST',{inviteCode});if(captured===generation)publish(next);return next;},
     requestJoin(groupId){return request('/api/pelada-request','POST',{groupId});},
     joinRequests(){return request('/api/pelada-requests');},
     decideJoin(requestId,decision){return request('/api/pelada-request-action','POST',{requestId,decision});},
+    async switchGroup(groupId){await pending;const captured=++generation,next=await request('/api/pelada-switch','POST',{groupId});if(captured===generation)publish(next);return next;},
     async logout(){await pending;generation++;await request('/api/logout','POST',{});current=null;onSignedOut();},
     async deleteAccount(data){await pending;generation++;await request('/api/account','DELETE',data);current=null;onSignedOut();},
     save(nextState){

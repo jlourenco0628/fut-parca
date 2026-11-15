@@ -139,7 +139,53 @@ test('peladas têm nome único, busca por nome ou ID e entrada direta pelo link'
   assert.equal(joined.group.id, admin.session.group.id);
   assert.equal(joined.group.role, 'member');
   assert.equal(joined.state.athletes.length, 2);
-  await assert.rejects(store.joinByInvite(profile.token, admin.session.group.inviteCode), status(409));
+  const reopened = await store.joinByInvite(profile.token, admin.session.group.inviteCode);
+  assert.equal(reopened.group.id, admin.session.group.id);
+});
+
+test('uma conta cria, entra e alterna entre várias peladas', async t => {
+  const { store, admin } = await fixture(t, false);
+  const originalId = admin.session.group.id;
+  const second = await store.createGroup(admin.token, { name:'Pelada de Domingo', scheduleType:'recurring', weeklyDay:'Domingo', weeklyTime:'08:00' });
+  assert.equal(second.group.name, 'Pelada de Domingo');
+  assert.equal(second.group.role, 'organizer');
+  assert.equal(second.groups.length, 2);
+  assert.equal(second.state.athletes.length, 1);
+
+  const original = await store.switchGroup(admin.token, originalId);
+  assert.equal(original.group.id, originalId);
+  assert.equal(original.group.role, 'organizer');
+  assert.equal(original.groups.length, 2);
+
+  const other = await store.register({ name:'Dono da Terça', email:'terca@example.com', password:'senha-terca-123', groupName:'Pelada de Terça' });
+  const joined = await store.joinByInvite(admin.token, other.session.group.inviteCode);
+  assert.equal(joined.group.id, other.session.group.id);
+  assert.equal(joined.group.role, 'member');
+  assert.equal(joined.groups.length, 3);
+  assert.equal(joined.state.athletes.length, 2);
+
+  const backToSecond = await store.switchGroup(admin.token, second.group.id);
+  assert.equal(backToSecond.group.role, 'organizer');
+  assert.equal(backToSecond.state.athletes.length, 1);
+});
+
+test('aprovação adiciona nova pelada sem remover as turmas atuais do atleta', async t => {
+  const { store, member } = await fixture(t, true);
+  const own = await store.createGroup(member.token, { name:'Pelada Alternativa', scheduleType:'single', singleDate:'2026-12-20', singleTime:'10:00' });
+  const target = await store.register({ name:'Organizador Alvo', email:'alvo@example.com', password:'senha-alvo-123', groupName:'Pelada Alvo' });
+  await store.requestJoin(member.token, target.session.group.id);
+  assert.equal((await store.getState(member.token)).group.id, own.group.id, 'o pedido não pode trocar a pelada ativa');
+  const requests = await store.joinRequests(target.token);
+  assert.equal(requests.length, 1);
+  await store.decideJoin(target.token, requests[0].id, 'approve');
+
+  const unchangedActive = await store.getState(member.token);
+  assert.equal(unchangedActive.group.id, own.group.id);
+  assert.equal(unchangedActive.groups.length, 3);
+  const opened = await store.switchGroup(member.token, target.session.group.id);
+  assert.equal(opened.group.role, 'member');
+  assert.equal(opened.state.athletes.length, 2);
+  await assert.rejects(store.requestJoin(member.token, target.session.group.id), status(409));
 });
 
 test('pelada fixa guarda recorrência e pelada avulsa aceita somente um evento na data configurada', async t => {

@@ -119,6 +119,24 @@ test('a delayed sync from the previous account cannot replace a new login', asyn
   assert.deepEqual(errors, []);
 });
 
+test('uma sincronização atrasada não reabre a pelada anterior após a troca', async t => {
+  const delayedSync = deferred(), first = session('alice', 2), second = { ...session('alice', 1, 'segunda-pelada'), group:{ ...session('alice').group, id:'group-second', name:'Segunda pelada' } };
+  const { client, publications, errors } = harness(t, async request => {
+    if (request.path === '/api/session') return response(first);
+    if (request.path === '/api/state') return delayedSync.promise;
+    if (request.path === '/api/pelada-switch') return response(second);
+    assert.fail(`Unexpected request ${request.method} ${request.path}`);
+  });
+  await client.ready();
+  const syncing = client.sync();
+  await client.switchGroup(second.group.id);
+  delayedSync.resolve(response({ ...first, revision:3, state:roundState('atrasada') }));
+  await syncing;
+  assert.equal(client.current.group.id, second.group.id);
+  assert.deepEqual(publications.map(value => value.group.id), [first.group.id, second.group.id]);
+  assert.deepEqual(errors, []);
+});
+
 test('logout waits for pending saves before ending the server session', async t => {
   const write = deferred(), initial = session('alice', 3);
   const { client, requests, lifecycle, errors } = harness(t, async request => {
