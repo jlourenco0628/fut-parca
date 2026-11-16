@@ -188,6 +188,49 @@ test('aprovação adiciona nova pelada sem remover as turmas atuais do atleta', 
   await assert.rejects(store.requestJoin(member.token, target.session.group.id), status(409));
 });
 
+test('atleta sai somente da pelada atual e mantém suas outras turmas', async t => {
+  const { store, admin, member } = await fixture(t, true);
+  const originalId = admin.session.group.id;
+  const own = await store.createGroup(member.token, { name:'Pelada Particular', scheduleType:'recurring', weeklyDay:'Sábado', weeklyTime:'09:00' });
+  await store.switchGroup(member.token, originalId);
+  const afterLeaving = await store.leaveGroup(member.token);
+  assert.equal(afterLeaving.group.id, own.group.id);
+  assert.equal(afterLeaving.group.role, 'organizer');
+  assert.equal(afterLeaving.groups.length, 1);
+  const original = await store.getState(admin.token);
+  assert.equal(original.state.athletes.some(athlete => athlete.id === member.session.athleteId), false);
+});
+
+test('organizador que sai promove outro atleta e preserva sua conta', async t => {
+  const { store, admin, member } = await fixture(t, true);
+  const originalId = admin.session.group.id;
+  const other = await store.createGroup(admin.token, { name:'Pelada do Organizador', scheduleType:'single', singleDate:'2026-12-21', singleTime:'18:00' });
+  await store.switchGroup(admin.token, originalId);
+  const afterLeaving = await store.leaveGroup(admin.token);
+  assert.equal(afterLeaving.group.id, other.group.id);
+  assert.equal(afterLeaving.groups.length, 1);
+  const promoted = await store.getState(member.token);
+  assert.equal(promoted.group.id, originalId);
+  assert.equal(promoted.group.role, 'organizer');
+  assert.equal(promoted.state.athletes.some(athlete => athlete.id === admin.session.athleteId), false);
+});
+
+test('ao sair da única pelada a conta volta ao perfil e pedidos pendentes não bloqueiam a saída', async t => {
+  const { store, admin } = await fixture(t, false);
+  const oldGroupId = admin.session.group.id;
+  const applicant = await store.register({ name:'Atleta Pendente', email:'pendente@example.com', password:'senha-pendente-123' });
+  await store.requestJoin(applicant.token, oldGroupId);
+  const afterLeaving = await store.leaveGroup(admin.token);
+  assert.equal(afterLeaving.group.profileOnly, true);
+  assert.equal(afterLeaving.group.name, 'Meu perfil');
+  assert.equal(afterLeaving.groups.filter(group => !group.profileOnly).length, 0);
+  assert.equal(afterLeaving.state.athletes[0].id, admin.session.athleteId);
+  assert.equal((await store.searchGroups('Turma dos Testes')).length, 0);
+  const recreated = await store.createGroup(admin.token, { name:'Nova Pelada do Mesmo Perfil', scheduleType:'recurring', weeklyDay:'Quarta', weeklyTime:'20:00' });
+  assert.equal(recreated.athleteId, admin.session.athleteId);
+  assert.equal(recreated.group.role, 'organizer');
+});
+
 test('pelada fixa guarda recorrência e pelada avulsa aceita somente um evento na data configurada', async t => {
   const { store } = await fixture(t, false);
   const recurringProfile = await store.register({ name: 'Fixo Teste', email: 'fixo@example.com', password: 'senha-fixa-123' });

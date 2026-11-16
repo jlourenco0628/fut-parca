@@ -137,6 +137,21 @@ test('uma sincronização atrasada não reabre a pelada anterior após a troca',
   assert.deepEqual(errors, []);
 });
 
+test('sair da pelada mantém a sessão e publica a turma restante', async t => {
+  const first = session('alice', 2), remaining = { ...session('alice', 1, 'turma-restante'), group:{ ...session('alice').group, id:'group-remaining', name:'Turma restante' } };
+  const { client, requests, publications, errors } = harness(t, async request => {
+    if (request.path === '/api/session') return response(first);
+    if (request.path === '/api/pelada-membership') return response(remaining);
+    assert.fail(`Unexpected request ${request.method} ${request.path}`);
+  });
+  await client.ready();
+  await client.leaveGroup();
+  assert.deepEqual(requests.at(-1), { path:'/api/pelada-membership', method:'DELETE', body:{} });
+  assert.equal(client.current.group.id, remaining.group.id);
+  assert.deepEqual(publications.map(value => value.group.id), [first.group.id, remaining.group.id]);
+  assert.deepEqual(errors, []);
+});
+
 test('logout waits for pending saves before ending the server session', async t => {
   const write = deferred(), initial = session('alice', 3);
   const { client, requests, lifecycle, errors } = harness(t, async request => {

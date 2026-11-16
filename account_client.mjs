@@ -22,6 +22,7 @@ export function createAccountClient({onSession,onSignedOut,onError}) {
     joinRequests(){return request('/api/pelada-requests');},
     decideJoin(requestId,decision){return request('/api/pelada-request-action','POST',{requestId,decision});},
     async switchGroup(groupId){await pending;const captured=++generation,next=await request('/api/pelada-switch','POST',{groupId});if(captured===generation)publish(next);return next;},
+    async leaveGroup(){await pending;const captured=++generation,next=await request('/api/pelada-membership','DELETE',{});if(captured===generation)publish(next);return next;},
     async logout(){await pending;generation++;await request('/api/logout','POST',{});current=null;onSignedOut();},
     async deleteAccount(data){await pending;generation++;await request('/api/account','DELETE',data);current=null;onSignedOut();},
     save(nextState){

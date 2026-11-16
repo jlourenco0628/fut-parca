@@ -16,6 +16,6 @@ test('servidor expõe canais, limita tentativas e conecta as duas rotas de recup
 });
 
 test('service worker força atualização dos arquivos de interface alterados', () => {
-  assert.match(serviceWorker, /fut-parca-shell-v24/u);
+  assert.match(serviceWorker, /fut-parca-shell-v25/u);
   assert.match(serviceWorker, /card\.css\?v=23/u);
 });

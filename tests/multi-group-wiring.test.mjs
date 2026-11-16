@@ -13,6 +13,10 @@ test('servidor e cliente conectam a troca de pelada ativa', () => {
   assert.match(server, /store\.switchGroup\(sessionToken\(req\), body\.groupId\)/u);
   assert.match(client, /switchGroup\(groupId\)/u);
   assert.match(client, /\/api\/pelada-switch/u);
+  assert.match(server, /pathname === '\/api\/pelada-membership'.*req\.method === 'DELETE'/u);
+  assert.match(server, /store\.leaveGroup\(sessionToken\(req\)\)/u);
+  assert.match(client, /leaveGroup\(\)/u);
+  assert.match(client, /\/api\/pelada-membership','DELETE'/u);
 });
 
 test('interface lista, cria, encontra e alterna entre peladas da conta', () => {
@@ -21,4 +25,7 @@ test('interface lista, cria, encontra e alterna entre peladas da conta', () => {
   assert.match(app, /Criar nova pelada/u);
   assert.match(app, /Encontrar pelada/u);
   assert.match(app, /accounts\.switchGroup/u);
+  assert.match(app, /Sair desta pelada/u);
+  assert.match(app, /leave-group-confirm/u);
+  assert.match(app, /accounts\.leaveGroup/u);
 });

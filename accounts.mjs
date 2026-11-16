@@ -220,6 +220,8 @@ async function openSupabaseRepository({ url, key, secret }) {
     requestById: id => read(() => data.joinRequests.find(item => item.id === id)),
     insertRequest: request => data.joinRequests.push(copy(request)),
     updateRequest(id, status) { const item = data.joinRequests.find(request => request.id === id); if (item) item.status = status; },
+    deleteRequestsForUser(userId) { data.joinRequests = data.joinRequests.filter(request => request.userId !== userId); },
+    deleteRequestsForGroup(groupId) { data.joinRequests = data.joinRequests.filter(request => request.groupId !== groupId); },
     deleteUser(id) { data.users = data.users.filter(user => user.id !== id); },
     sessionByHash: hash => read(() => data.sessions.find(session => session.hash === hash)),
     insertSession(hash, userId, expiresAt) { data.sessions = data.sessions.filter(session => session.expiresAt > Date.now()); data.sessions.push({ hash, userId, expiresAt }); },
@@ -287,6 +289,8 @@ async function openPostgresRepository(databaseUrl) {
     requestById: id => read(() => data.joinRequests.find(item => item.id === id)),
     insertRequest: request => data.joinRequests.push(copy(request)),
     updateRequest(id, status) { const item = data.joinRequests.find(request => request.id === id); if (item) item.status = status; },
+    deleteRequestsForUser(userId) { data.joinRequests = data.joinRequests.filter(request => request.userId !== userId); },
+    deleteRequestsForGroup(groupId) { data.joinRequests = data.joinRequests.filter(request => request.groupId !== groupId); },
     deleteUser(id) { data.users = data.users.filter(user => user.id !== id); },
     sessionByHash: hash => read(() => data.sessions.find(session => session.hash === hash)),
     insertSession(hash, userId, expiresAt) { data.sessions = data.sessions.filter(session => session.expiresAt > Date.now()); data.sessions.push({ hash, userId, expiresAt }); },
@@ -372,6 +376,8 @@ async function openRepository(path, databaseUrl, supabase) {
       requestById(id) { return db.prepare('SELECT * FROM join_requests WHERE id=?').get(id); },
       insertRequest(request) { db.prepare('INSERT INTO join_requests VALUES (?,?,?,?,?)').run(request.id, request.userId, request.groupId, request.status, request.createdAt); },
       updateRequest(id, status) { db.prepare('UPDATE join_requests SET status=? WHERE id=?').run(status, id); },
+      deleteRequestsForUser(userId) { db.prepare('DELETE FROM join_requests WHERE user_id=?').run(userId); },
+      deleteRequestsForGroup(groupId) { db.prepare('DELETE FROM join_requests WHERE group_id=?').run(groupId); },
       deleteUser(id) { db.prepare('DELETE FROM users WHERE id=?').run(id); },
       sessionByHash: hash => { const row = db.prepare('SELECT * FROM sessions WHERE token_hash=?').get(hash); return row ? { userId: row.user_id, expiresAt: row.expires_at } : undefined; },
       insertSession(hash, userId, expiresAt) { db.prepare('DELETE FROM sessions WHERE expires_at<=?').run(Date.now()); db.prepare('INSERT INTO sessions VALUES (?,?,?)').run(hash, userId, expiresAt); },
@@ -429,6 +435,8 @@ async function openRepository(path, databaseUrl, supabase) {
     requestById: id => read(() => data.joinRequests.find(item => item.id === id)),
     insertRequest: request => data.joinRequests.push(copy(request)),
     updateRequest(id, status) { const item = data.joinRequests.find(request => request.id === id); if (item) item.status = status; },
+    deleteRequestsForUser(userId) { data.joinRequests = data.joinRequests.filter(request => request.userId !== userId); },
+    deleteRequestsForGroup(groupId) { data.joinRequests = data.joinRequests.filter(request => request.groupId !== groupId); },
     deleteUser(id) { data.users = data.users.filter(user => user.id !== id); },
     sessionByHash: hash => read(() => data.sessions.find(session => session.hash === hash)),
     insertSession(hash, userId, expiresAt) { data.sessions = data.sessions.filter(session => session.expiresAt > Date.now()); data.sessions.push({ hash, userId, expiresAt }); },
@@ -790,6 +798,7 @@ export async function createAccountStore({ path, databaseUrl, supabase, recovery
         if (user.id !== current.user.id) error('Entre novamente para excluir sua conta.', 401);
         repository.deleteSessionsForUser(user.id);
         repository.deletePasswordResetsForUser(user.id);
+        repository.deleteRequestsForUser(user.id);
         const groupsToDelete = [];
         for (const { group, role } of availableGroupsFor(user)) {
           const members = repository.usersForGroup(group.id), others = members.filter(member => member.id !== user.id);
@@ -800,7 +809,7 @@ export async function createAccountStore({ path, databaseUrl, supabase, recovery
           repository.updateGroup(group);
         }
         repository.deleteUser(user.id);
-        for (const groupId of groupsToDelete) repository.deleteGroup(groupId);
+        for (const groupId of groupsToDelete) { repository.deleteRequestsForGroup(groupId); repository.deleteGroup(groupId); }
         return { ok:true, groupDeleted:groupsToDelete.length > 0 };
       });
     },
@@ -918,6 +927,34 @@ export async function createAccountStore({ path, databaseUrl, supabase, recovery
         if (!group) error('Pelada não encontrada.', 404);
         repository.setActiveGroup(user.id, id);
         return sessionFor(repository.userById(user.id), group);
+      });
+    },
+    async leaveGroup(token) {
+      return repository.transaction(() => {
+        const { user, group } = requireSession(token);
+        if (group.state.profileOnly) error('Você ainda não faz parte de uma pelada.', 409);
+        const profile = group.state.athletes.find(athlete => athlete.id === user.athleteId) || profileForUser(user)?.profile;
+        if (!profile) error('Seu perfil de atleta não foi encontrado.', 409);
+        const others = repository.usersForGroup(group.id).filter(member => member.id !== user.id);
+        const remaining = membershipsOf(user).filter(membership => membership.groupId !== group.id && repository.groupById(membership.groupId));
+        let fallback = remaining.length ? repository.groupById(remaining[0].groupId) : null;
+        if (fallback) repository.setActiveGroup(user.id, fallback.id);
+        else {
+          let code; do { code = randomBytes(6).toString('hex').toUpperCase(); } while (repository.groupByInvite(code));
+          fallback = { id:`group-${randomUUID()}`, name:'Meu perfil', inviteCode:code, revision:1, state:{ version:1, athletes:[copy(profile)], rounds:[], profileOnly:true } };
+          repository.insertGroup(fallback);
+          repository.updateUserMembership(user.id, fallback.id, 'member', true);
+        }
+        if (others.length) {
+          if (membershipRole(user, group.id) === 'organizer') repository.updateUserRole(others[0].id, group.id, 'organizer');
+          group.state = withoutAccountData(group.state, user);
+          group.revision++;
+          repository.updateGroup(group);
+        }
+        repository.removeUserMembership(user.id, group.id);
+        if (!others.length) { repository.deleteRequestsForGroup(group.id); repository.deleteGroup(group.id); }
+        const current = repository.userById(user.id), active = repository.groupById(current.groupId);
+        return sessionFor(current, active);
       });
     },
     async saveState(token, input = {}) {
