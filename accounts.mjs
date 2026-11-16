@@ -133,6 +133,17 @@ function removeMemoryMembership(user, groupId) {
   }
 }
 
+function personalProfileOf(athlete) {
+  return Object.fromEntries([...PERSONAL_FIELDS].filter(field => Object.hasOwn(athlete || {}, field)).map(field => [field, copy(athlete[field])]));
+}
+
+function applyPersonalProfile(target, source) {
+  for (const field of PERSONAL_FIELDS) {
+    if (Object.hasOwn(source, field)) target[field] = copy(source[field]);
+    else delete target[field];
+  }
+}
+
 function publicSession(user, group, availableGroups = []) {
   const role = membershipRole(user, group.id) || (user.role === 'organizer' ? 'organizer' : 'member');
   return {
@@ -214,6 +225,7 @@ async function openSupabaseRepository({ url, key, secret }) {
     updateUserMembership(id, groupId, role, makeActive = true) { const user = data.users.find(item => item.id === id); if (user) setMemoryMembership(user, groupId, role, makeActive); },
     setActiveGroup(id, groupId) { const user = data.users.find(item => item.id === id); if (user) setMemoryActiveGroup(user, groupId); },
     removeUserMembership(id, groupId) { const user = data.users.find(item => item.id === id); if (user) removeMemoryMembership(user, groupId); },
+    updateUserName(id, name) { const user = data.users.find(item => item.id === id); if (user) user.name = name; },
     updateUserPassword(id, salt, hash) { const user = data.users.find(item => item.id === id); if (user) { user.salt = salt; user.hash = hash; } },
     requestByUserGroup: (userId, groupId) => read(() => data.joinRequests.find(item => item.userId === userId && item.groupId === groupId)),
     requestsForGroup: groupId => read(() => data.joinRequests.filter(item => item.groupId === groupId)),
@@ -283,6 +295,7 @@ async function openPostgresRepository(databaseUrl) {
     updateUserMembership(id, groupId, role, makeActive = true) { const user = data.users.find(item => item.id === id); if (user) setMemoryMembership(user, groupId, role, makeActive); },
     setActiveGroup(id, groupId) { const user = data.users.find(item => item.id === id); if (user) setMemoryActiveGroup(user, groupId); },
     removeUserMembership(id, groupId) { const user = data.users.find(item => item.id === id); if (user) removeMemoryMembership(user, groupId); },
+    updateUserName(id, name) { const user = data.users.find(item => item.id === id); if (user) user.name = name; },
     updateUserPassword(id, salt, hash) { const user = data.users.find(item => item.id === id); if (user) { user.salt = salt; user.hash = hash; } },
     requestByUserGroup: (userId, groupId) => read(() => data.joinRequests.find(item => item.userId === userId && item.groupId === groupId)),
     requestsForGroup: groupId => read(() => data.joinRequests.filter(item => item.groupId === groupId)),
@@ -370,6 +383,7 @@ async function openRepository(path, databaseUrl, supabase) {
           if (next) db.prepare('UPDATE users SET group_id=?,role=? WHERE id=?').run(next.group_id, next.role, id);
         }
       },
+      updateUserName(id, name) { db.prepare('UPDATE users SET name=? WHERE id=?').run(name, id); },
       updateUserPassword(id, salt, hash) { db.prepare('UPDATE users SET password_salt=?,password_hash=? WHERE id=?').run(salt, hash, id); },
       requestByUserGroup(userId, groupId) { return db.prepare('SELECT * FROM join_requests WHERE user_id=? AND group_id=?').get(userId, groupId); },
       requestsForGroup(groupId) { return db.prepare('SELECT * FROM join_requests WHERE group_id=? ORDER BY created_at').all(groupId); },
@@ -429,6 +443,7 @@ async function openRepository(path, databaseUrl, supabase) {
     updateUserMembership(id, groupId, role, makeActive = true) { const user = data.users.find(item => item.id === id); if (user) setMemoryMembership(user, groupId, role, makeActive); },
     setActiveGroup(id, groupId) { const user = data.users.find(item => item.id === id); if (user) setMemoryActiveGroup(user, groupId); },
     removeUserMembership(id, groupId) { const user = data.users.find(item => item.id === id); if (user) removeMemoryMembership(user, groupId); },
+    updateUserName(id, name) { const user = data.users.find(item => item.id === id); if (user) user.name = name; },
     updateUserPassword(id, salt, hash) { const user = data.users.find(item => item.id === id); if (user) { user.salt = salt; user.hash = hash; } },
     requestByUserGroup: (userId, groupId) => read(() => data.joinRequests.find(item => item.userId === userId && item.groupId === groupId)),
     requestsForGroup: groupId => read(() => data.joinRequests.filter(item => item.groupId === groupId)),
@@ -964,8 +979,22 @@ export async function createAccountStore({ path, databaseUrl, supabase, recovery
         object(input.state, 'Estado');
         const next = validateState(input.state, group.state, repository.usersForGroup(group.id));
         if (user.role !== 'organizer') validateMemberChanges(group.state, next, user);
+        const previousProfile = group.state.athletes.find(athlete => athlete.id === user.athleteId);
+        const nextProfile = next.athletes.find(athlete => athlete.id === user.athleteId);
+        const personalChanged = Boolean(previousProfile && nextProfile && !isDeepStrictEqual(personalProfileOf(previousProfile), personalProfileOf(nextProfile)));
         group.state = next; group.revision++; repository.updateGroup(group);
-        return sessionFor(user, group);
+        if (personalChanged) {
+          repository.updateUserName(user.id, nextProfile.name);
+          for (const membership of membershipsOf(user)) {
+            if (membership.groupId === group.id) continue;
+            const otherGroup = repository.groupById(membership.groupId), otherProfile = otherGroup?.state?.athletes?.find(athlete => athlete.id === user.athleteId);
+            if (!otherGroup || !otherProfile) continue;
+            applyPersonalProfile(otherProfile, nextProfile);
+            otherGroup.revision++;
+            repository.updateGroup(otherGroup);
+          }
+        }
+        return sessionFor(repository.userById(user.id), group);
       });
     },
     async close() { if (!closed) { repository.close(); closed = true; } },

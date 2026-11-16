@@ -231,6 +231,41 @@ test('ao sair da única pelada a conta volta ao perfil e pedidos pendentes não 
   assert.equal(recreated.group.role, 'organizer');
 });
 
+test('dados pessoais do atleta sincronizam entre peladas sem misturar suas skills', async t => {
+  const { store, admin } = await fixture(t, false);
+  const originalId = admin.session.group.id;
+  const second = await store.createGroup(admin.token, { name:'Pelada do Perfil Sincronizado', scheduleType:'recurring', weeklyDay:'Terça', weeklyTime:'19:30' });
+
+  let original = await store.switchGroup(admin.token, originalId);
+  const originalAthlete = original.state.athletes.find(athlete => athlete.id === admin.session.athleteId);
+  originalAthlete.baseSkills.futsal.rit = 77;
+  await store.saveState(admin.token, { state:original.state, expectedRevision:original.revision });
+
+  let activeSecond = await store.switchGroup(admin.token, second.group.id);
+  const edited = activeSecond.state.athletes.find(athlete => athlete.id === admin.session.athleteId);
+  edited.name = 'Rafael Perfil Atualizado';
+  edited.nickname = 'Rafa Novo';
+  edited.contact = '(85) 99999-1111';
+  edited.avatar = 'avatar-4';
+  edited.sex = 'masculino';
+  edited.birthDate = '1995-06-12';
+  const saved = await store.saveState(admin.token, { state:activeSecond.state, expectedRevision:activeSecond.revision });
+  assert.equal(saved.user.name, 'Rafael Perfil Atualizado');
+
+  original = await store.switchGroup(admin.token, originalId);
+  const synchronized = original.state.athletes.find(athlete => athlete.id === admin.session.athleteId);
+  assert.equal(synchronized.name, 'Rafael Perfil Atualizado');
+  assert.equal(synchronized.nickname, 'Rafa Novo');
+  assert.equal(synchronized.contact, '(85) 99999-1111');
+  assert.equal(synchronized.avatar, 'avatar-4');
+  assert.equal(synchronized.sex, 'masculino');
+  assert.equal(synchronized.birthDate, '1995-06-12');
+  assert.equal(synchronized.baseSkills.futsal.rit, 77);
+
+  activeSecond = await store.switchGroup(admin.token, second.group.id);
+  assert.equal(activeSecond.state.athletes.find(athlete => athlete.id === admin.session.athleteId).baseSkills.futsal.rit, 60);
+});
+
 test('pelada fixa guarda recorrência e pelada avulsa aceita somente um evento na data configurada', async t => {
   const { store } = await fixture(t, false);
   const recurringProfile = await store.register({ name: 'Fixo Teste', email: 'fixo@example.com', password: 'senha-fixa-123' });
